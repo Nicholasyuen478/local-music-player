@@ -1,5 +1,5 @@
 import { Image } from "expo-image";
-import React, { useMemo } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import { StyleSheet, View, ViewStyle } from "react-native";
 import Colors from "@/constants/colors";
 
@@ -11,22 +11,21 @@ type Props = {
   borderRadius?: number;
 };
 
-function hashCode(str: string): number {
-  let hash = 0;
-  for (let i = 0; i < str.length; i++) {
-    const char = str.charCodeAt(i);
-    hash = (hash << 5) - hash + char;
-    hash = hash & hash;
-  }
-  return hash;
-}
-
 export function SongArtwork({ imagePool, songId, size, style, borderRadius = 12 }: Props) {
-  // Deterministic: same song always maps to the same image index
-  const imageUri = useMemo(() => {
-    if (!songId || imagePool.length === 0) return null;
-    const idx = Math.abs(hashCode(songId)) % imagePool.length;
-    return imagePool[idx];
+  const [imageUri, setImageUri] = useState<string | null>(null);
+  const prevSongId = useRef<string | null | undefined>(undefined);
+
+  useEffect(() => {
+    if (imagePool.length === 0) {
+      setImageUri(null);
+      return;
+    }
+    // Pick a new random image whenever the song changes
+    if (prevSongId.current !== songId) {
+      prevSongId.current = songId;
+      const idx = Math.floor(Math.random() * imagePool.length);
+      setImageUri(imagePool[idx]);
+    }
   }, [songId, imagePool]);
 
   return (
@@ -42,7 +41,7 @@ export function SongArtwork({ imagePool, songId, size, style, borderRadius = 12 
           source={{ uri: imageUri }}
           style={[StyleSheet.absoluteFill, { borderRadius }]}
           contentFit="cover"
-          transition={200}
+          transition={300}
         />
       ) : (
         <View style={[StyleSheet.absoluteFill, styles.placeholder, { borderRadius }]}>
@@ -61,18 +60,11 @@ function DefaultArt({ size }: { size: number }) {
         <View
           style={[
             styles.noteCircle,
-            {
-              width: iconSize * 0.4,
-              height: iconSize * 0.4,
-              borderRadius: iconSize * 0.2,
-            },
+            { width: iconSize * 0.4, height: iconSize * 0.4, borderRadius: iconSize * 0.2 },
           ]}
         />
         <View
-          style={[
-            styles.noteStem,
-            { height: iconSize * 0.7, left: iconSize * 0.35 },
-          ]}
+          style={[styles.noteStem, { height: iconSize * 0.7, left: iconSize * 0.35 }]}
         />
       </View>
     </View>
@@ -94,9 +86,7 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
   },
-  noteOuter: {
-    position: "relative",
-  },
+  noteOuter: { position: "relative" },
   noteCircle: {
     backgroundColor: Colors.dark.textTertiary,
     position: "absolute",

@@ -182,10 +182,13 @@ const [MusicContextProvider, useMusicContext] = createContextHook(() => {
         setMusicFolderUri(folderUri);
         setSongs(found);
         setQueue(found);
+        setCurrentIndex(0);
         setIsSetupDone(true);
         await Promise.all([
           AsyncStorage.setItem(STORAGE_KEYS.MUSIC_FOLDER, folderUri),
           AsyncStorage.setItem(STORAGE_KEYS.SONGS, JSON.stringify(found)),
+          AsyncStorage.setItem(STORAGE_KEYS.QUEUE, JSON.stringify(found)),
+          AsyncStorage.setItem(STORAGE_KEYS.CURRENT_INDEX, "0"),
         ]);
         return true;
       } else {
@@ -194,10 +197,13 @@ const [MusicContextProvider, useMusicContext] = createContextHook(() => {
         setMusicFolderUri("picker");
         setSongs(found);
         setQueue(found);
+        setCurrentIndex(0);
         setIsSetupDone(true);
         await Promise.all([
           AsyncStorage.setItem(STORAGE_KEYS.MUSIC_FOLDER, "picker"),
           AsyncStorage.setItem(STORAGE_KEYS.SONGS, JSON.stringify(found)),
+          AsyncStorage.setItem(STORAGE_KEYS.QUEUE, JSON.stringify(found)),
+          AsyncStorage.setItem(STORAGE_KEYS.CURRENT_INDEX, "0"),
         ]);
         return true;
       }
