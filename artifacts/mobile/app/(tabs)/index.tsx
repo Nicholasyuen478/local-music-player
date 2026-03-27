@@ -3,6 +3,7 @@ import * as Haptics from "expo-haptics";
 import { LinearGradient } from "expo-linear-gradient";
 import React, { useState, useCallback, useRef, useEffect } from "react";
 import {
+  Alert,
   Animated,
   FlatList,
   PanResponder,
@@ -43,6 +44,7 @@ export default function PlayerScreen() {
     pickMusicFolder,
     addMoreSongs,
     rescanFolder,
+    resetSetup,
     togglePlayPause,
     playNext,
     playPrev,
@@ -50,6 +52,24 @@ export default function PlayerScreen() {
     seekTo,
     playSong,
   } = useMusicContext();
+
+  const handleClearAll = useCallback(() => {
+    Alert.alert(
+      "Clear All Music",
+      "This will remove all loaded songs and return to the setup screen.",
+      [
+        { text: "Cancel", style: "cancel" },
+        {
+          text: "Clear",
+          style: "destructive",
+          onPress: () => {
+            Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning);
+            resetSetup();
+          },
+        },
+      ]
+    );
+  }, [resetSetup]);
 
   const artSize = Math.min(width - 64, 320);
   const topInset = Platform.OS === "web" ? 67 : insets.top;
@@ -187,13 +207,18 @@ export default function PlayerScreen() {
 
       {/* Top bar */}
       <View style={styles.topBar}>
-        <TouchableOpacity onPress={handleTopAction} style={styles.iconButton} activeOpacity={0.7}>
-          <Feather
-            name={SAF_AVAILABLE ? "refresh-cw" : "plus-circle"}
-            size={20}
-            color={Colors.dark.textSecondary}
-          />
-        </TouchableOpacity>
+        <View style={styles.topBarLeft}>
+          <TouchableOpacity onPress={handleTopAction} style={styles.iconButton} activeOpacity={0.7}>
+            <Feather
+              name={SAF_AVAILABLE ? "refresh-cw" : "plus-circle"}
+              size={20}
+              color={Colors.dark.textSecondary}
+            />
+          </TouchableOpacity>
+          <TouchableOpacity onPress={handleClearAll} style={styles.iconButton} activeOpacity={0.7}>
+            <Feather name="trash-2" size={18} color={Colors.dark.textTertiary} />
+          </TouchableOpacity>
+        </View>
         <Text style={styles.topTitle}>Now Playing</Text>
         <TouchableOpacity onPress={() => setShowQueue(true)} style={styles.iconButton} activeOpacity={0.7}>
           <Ionicons name="list" size={22} color={Colors.dark.textSecondary} />
@@ -346,6 +371,11 @@ const styles = StyleSheet.create({
     justifyContent: "space-between",
     paddingHorizontal: 20,
     paddingVertical: 12,
+  },
+  topBarLeft: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 2,
   },
   topTitle: {
     color: Colors.dark.textSecondary,

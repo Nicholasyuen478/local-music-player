@@ -199,6 +199,8 @@ const [MusicContextProvider, useMusicContext] = createContextHook(() => {
         setQueue(found);
         setCurrentIndex(0);
         setIsSetupDone(true);
+        // Auto-load the first song so the player is ready
+        player.replace({ uri: found[0].uri });
         await Promise.all([
           AsyncStorage.setItem(STORAGE_KEYS.MUSIC_FOLDER, "picker"),
           AsyncStorage.setItem(STORAGE_KEYS.SONGS, JSON.stringify(found)),
@@ -211,7 +213,7 @@ const [MusicContextProvider, useMusicContext] = createContextHook(() => {
       console.error("pickMusicFolder error", e);
       return false;
     }
-  }, []);
+  }, [player]);
 
   // Add more files on top of existing songs (Expo Go)
   const addMoreSongs = useCallback(async () => {
