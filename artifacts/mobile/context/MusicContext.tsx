@@ -25,57 +25,55 @@ const STORAGE_KEYS = {
   SHUFFLE: "shuffle_enabled",
 };
 
-async function scanMusicFolder(folderUri: string): Promise<Song[]> {
+const SAF = FileSystem.StorageAccessFramework;
+const SAF_AVAILABLE = !!SAF && typeof SAF.requestDirectoryPermissionsAsync === "function";
+
+async function scanMusicFolderSAF(folderUri: string): Promise<Song[]> {
   try {
-    if (Platform.OS === "android" && folderUri.startsWith("content://")) {
-      const files = await FileSystem.StorageAccessFramework.readDirectoryAsync(folderUri);
-      const songs: Song[] = [];
-      for (const fileUri of files) {
-        const lower = fileUri.toLowerCase();
-        if (lower.endsWith(".mp3") || lower.endsWith(".m4a") || lower.endsWith(".aac") || lower.endsWith(".ogg") || lower.endsWith(".flac") || lower.endsWith(".wav")) {
-          const filename = decodeURIComponent(fileUri.split("%2F").pop() || fileUri.split("/").pop() || fileUri);
-          const nameWithoutExt = filename.replace(/\.[^/.]+$/, "");
-          const parts = nameWithoutExt.split(" - ");
-          const artist = parts.length > 1 ? parts[0].trim() : "Unknown Artist";
-          const title = parts.length > 1 ? parts.slice(1).join(" - ").trim() : nameWithoutExt;
-          songs.push({
-            id: fileUri,
-            title,
-            artist,
-            uri: fileUri,
-            filename,
-          });
-        }
+    const files = await SAF.readDirectoryAsync(folderUri);
+    const songs: Song[] = [];
+    for (const fileUri of files) {
+      const lower = fileUri.toLowerCase();
+      if (lower.endsWith(".mp3") || lower.endsWith(".m4a") || lower.endsWith(".aac") || lower.endsWith(".ogg") || lower.endsWith(".flac") || lower.endsWith(".wav")) {
+        const filename = decodeURIComponent(fileUri.split("%2F").pop() || fileUri.split("/").pop() || fileUri);
+        const nameWithoutExt = filename.replace(/\.[^/.]+$/, "");
+        const parts = nameWithoutExt.split(" - ");
+        const artist = parts.length > 1 ? parts[0].trim() : "Unknown Artist";
+        const title = parts.length > 1 ? parts.slice(1).join(" - ").trim() : nameWithoutExt;
+        songs.push({ id: fileUri, title, artist, uri: fileUri, filename });
       }
-      return songs;
-    } else {
-      const info = await FileSystem.getInfoAsync(folderUri);
-      if (!info.exists || !info.isDirectory) return [];
-      const files = await FileSystem.readDirectoryAsync(folderUri);
-      const songs: Song[] = [];
-      for (const filename of files) {
-        const lower = filename.toLowerCase();
-        if (lower.endsWith(".mp3") || lower.endsWith(".m4a") || lower.endsWith(".aac") || lower.endsWith(".ogg") || lower.endsWith(".flac") || lower.endsWith(".wav")) {
-          const uri = folderUri.endsWith("/") ? `${folderUri}${filename}` : `${folderUri}/${filename}`;
-          const nameWithoutExt = filename.replace(/\.[^/.]+$/, "");
-          const parts = nameWithoutExt.split(" - ");
-          const artist = parts.length > 1 ? parts[0].trim() : "Unknown Artist";
-          const title = parts.length > 1 ? parts.slice(1).join(" - ").trim() : nameWithoutExt;
-          songs.push({
-            id: uri,
-            title,
-            artist,
-            uri,
-            filename,
-          });
-        }
-      }
-      return songs;
     }
+    return songs;
   } catch (e) {
-    console.error("scan error", e);
+    console.error("SAF scan error", e);
     return [];
   }
+}
+
+async function scanViaMediaLibrary(): Promise<Song[]> {
+  const { status } = await MediaLibrary.requestPermissionsAsync();
+  if (status !== "granted") return [];
+  const all: MediaLibrary.Asset[] = [];
+  let after: string | undefined;
+  let hasMore = true;
+  while (hasMore) {
+    const page = await MediaLibrary.getAssetsAsync({
+      mediaType: "audio",
+      first: 500,
+      after,
+    });
+    all.push(...page.assets);
+    hasMore = page.hasNextPage;
+    after = page.endCursor;
+    if (all.length >= 2000) break;
+  }
+  return all.map((a) => {
+    const nameWithoutExt = a.filename.replace(/\.[^/.]+$/, "");
+    const parts = nameWithoutExt.split(" - ");
+    const artist = parts.length > 1 ? parts[0].trim() : "Unknown Artist";
+    const title = parts.length > 1 ? parts.slice(1).join(" - ").trim() : nameWithoutExt;
+    return { id: a.id, title, artist, uri: a.uri, filename: a.filename, duration: a.duration };
+  });
 }
 
 function shuffleArray<T>(arr: T[]): T[] {
@@ -154,30 +152,45 @@ const [MusicContextProvider, useMusicContext] = createContextHook(() => {
   }
 
   const pickMusicFolder = useCallback(async () => {
-    if (Platform.OS === "android") {
-      const permissions = await FileSystem.StorageAccessFramework.requestDirectoryPermissionsAsync();
-      if (!permissions.granted) return false;
-      const folderUri = permissions.directoryUri;
-      setMusicFolderUri(folderUri);
-      await AsyncStorage.setItem(STORAGE_KEYS.MUSIC_FOLDER, folderUri);
-      const found = await scanMusicFolder(folderUri);
-      setSongs(found);
-      setQueue(found);
-      await AsyncStorage.setItem(STORAGE_KEYS.SONGS, JSON.stringify(found));
-      setIsSetupDone(true);
-      return true;
-    } else {
-      const { status: perm } = await MediaLibrary.requestPermissionsAsync();
-      if (perm !== "granted") return false;
-      const media = await MediaLibrary.getAssetsAsync({ mediaType: "audio", first: 500 });
-      const found: Song[] = media.assets.map((a) => ({
-        id: a.id,
-        title: a.filename.replace(/\.[^/.]+$/, ""),
-        artist: "Unknown Artist",
-        uri: a.uri,
-        filename: a.filename,
-        duration: a.duration,
-      }));
+    try {
+      if (Platform.OS === "android" && SAF_AVAILABLE) {
+        const permissions = await SAF.requestDirectoryPermissionsAsync();
+        if (!permissions.granted) {
+          const found = await scanViaMediaLibrary();
+          if (found.length === 0) return false;
+          setSongs(found);
+          setQueue(found);
+          await AsyncStorage.setItem(STORAGE_KEYS.SONGS, JSON.stringify(found));
+          await AsyncStorage.setItem(STORAGE_KEYS.MUSIC_FOLDER, "media-library");
+          setMusicFolderUri("media-library");
+          setIsSetupDone(true);
+          return true;
+        }
+        const folderUri = permissions.directoryUri;
+        setMusicFolderUri(folderUri);
+        await AsyncStorage.setItem(STORAGE_KEYS.MUSIC_FOLDER, folderUri);
+        const found = await scanMusicFolderSAF(folderUri);
+        const finalSongs = found.length > 0 ? found : await scanViaMediaLibrary();
+        setSongs(finalSongs);
+        setQueue(finalSongs);
+        await AsyncStorage.setItem(STORAGE_KEYS.SONGS, JSON.stringify(finalSongs));
+        setIsSetupDone(true);
+        return true;
+      } else {
+        const found = await scanViaMediaLibrary();
+        if (found.length === 0) return false;
+        setSongs(found);
+        setQueue(found);
+        await AsyncStorage.setItem(STORAGE_KEYS.SONGS, JSON.stringify(found));
+        await AsyncStorage.setItem(STORAGE_KEYS.MUSIC_FOLDER, "media-library");
+        setMusicFolderUri("media-library");
+        setIsSetupDone(true);
+        return true;
+      }
+    } catch (e) {
+      console.error("pickMusicFolder error", e);
+      const found = await scanViaMediaLibrary();
+      if (found.length === 0) return false;
       setSongs(found);
       setQueue(found);
       await AsyncStorage.setItem(STORAGE_KEYS.SONGS, JSON.stringify(found));
@@ -192,7 +205,12 @@ const [MusicContextProvider, useMusicContext] = createContextHook(() => {
     if (!musicFolderUri) return;
     setIsLoading(true);
     try {
-      const found = await scanMusicFolder(musicFolderUri);
+      let found: Song[] = [];
+      if (SAF_AVAILABLE && musicFolderUri.startsWith("content://")) {
+        found = await scanMusicFolderSAF(musicFolderUri);
+      } else {
+        found = await scanViaMediaLibrary();
+      }
       setSongs(found);
       setQueue(found);
       await AsyncStorage.setItem(STORAGE_KEYS.SONGS, JSON.stringify(found));
@@ -283,28 +301,40 @@ const [MusicContextProvider, useMusicContext] = createContextHook(() => {
   }, [imagePool]);
 
   const pickImageFolder = useCallback(async () => {
-    if (Platform.OS === "android") {
-      const permissions = await FileSystem.StorageAccessFramework.requestDirectoryPermissionsAsync();
-      if (!permissions.granted) return;
-      const folderUri = permissions.directoryUri;
-      setImageFolderUri(folderUri);
-      await AsyncStorage.setItem(STORAGE_KEYS.IMAGE_FOLDER, folderUri);
-      try {
-        const files = await FileSystem.StorageAccessFramework.readDirectoryAsync(folderUri);
-        const imgs = files.filter((f) => {
-          const lower = f.toLowerCase();
-          return lower.endsWith(".jpg") || lower.endsWith(".jpeg") || lower.endsWith(".png") || lower.endsWith(".webp") || lower.endsWith(".gif");
-        });
-        await addImagesToPool(imgs);
-      } catch (e) {
-        console.error("image folder scan error", e);
+    try {
+      if (SAF_AVAILABLE) {
+        const permissions = await SAF.requestDirectoryPermissionsAsync();
+        if (permissions.granted) {
+          const folderUri = permissions.directoryUri;
+          setImageFolderUri(folderUri);
+          await AsyncStorage.setItem(STORAGE_KEYS.IMAGE_FOLDER, folderUri);
+          const files = await SAF.readDirectoryAsync(folderUri);
+          const imgs = files.filter((f) => {
+            const lower = f.toLowerCase();
+            return lower.endsWith(".jpg") || lower.endsWith(".jpeg") || lower.endsWith(".png") || lower.endsWith(".webp") || lower.endsWith(".gif");
+          });
+          if (imgs.length > 0) {
+            await addImagesToPool(imgs);
+            return;
+          }
+        }
       }
-    } else {
       const { status: perm } = await MediaLibrary.requestPermissionsAsync();
       if (perm !== "granted") return;
-      const media = await MediaLibrary.getAssetsAsync({ mediaType: "photo", first: 100 });
+      const media = await MediaLibrary.getAssetsAsync({ mediaType: "photo", first: 200 });
       const uris = media.assets.map((a) => a.uri);
       await addImagesToPool(uris);
+    } catch (e) {
+      console.error("pickImageFolder error", e);
+      try {
+        const { status: perm } = await MediaLibrary.requestPermissionsAsync();
+        if (perm !== "granted") return;
+        const media = await MediaLibrary.getAssetsAsync({ mediaType: "photo", first: 200 });
+        const uris = media.assets.map((a) => a.uri);
+        await addImagesToPool(uris);
+      } catch (e2) {
+        console.error("pickImageFolder fallback error", e2);
+      }
     }
   }, [addImagesToPool]);
 

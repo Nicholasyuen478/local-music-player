@@ -35,7 +35,7 @@ export function SetupScreen({ onPickFolder, isLoading }: Props) {
 
       <Text style={styles.title}>Music Player</Text>
       <Text style={styles.subtitle}>
-        Select your music folder to get started.{"\n"}We'll remember it for next time.
+        Grant access to your music library to get started.{"\n"}We'll remember your choice.
       </Text>
 
       <TouchableOpacity
@@ -54,15 +54,15 @@ export function SetupScreen({ onPickFolder, isLoading }: Props) {
             <ActivityIndicator color="#fff" />
           ) : (
             <>
-              <Ionicons name="folder-open" size={22} color="#fff" style={{ marginRight: 10 }} />
-              <Text style={styles.buttonText}>Choose Music Folder</Text>
+              <Ionicons name="musical-notes" size={22} color="#fff" style={{ marginRight: 10 }} />
+              <Text style={styles.buttonText}>Load My Music</Text>
             </>
           )}
         </LinearGradient>
       </TouchableOpacity>
 
       <Text style={styles.hint}>
-        Supports MP3, M4A, AAC, FLAC, OGG, WAV
+        Scans your device for MP3, M4A, AAC, FLAC, OGG, WAV files
       </Text>
     </LinearGradient>
   );
