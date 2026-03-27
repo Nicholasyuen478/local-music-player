@@ -1,6 +1,8 @@
-import { Music2 } from "lucide-react-native";
-import React, { useRef } from "react";
+import * as Haptics from "expo-haptics";
+import { Check, Music2 } from "lucide-react-native";
+import React, { useCallback, useRef, useState } from "react";
 import {
+  Alert,
   FlatList,
   Platform,
   StyleSheet,
@@ -21,42 +23,118 @@ export default function LibraryScreen() {
     currentSong,
     isSetupDone,
     playSong,
+    removeSongs,
   } = useMusicContext();
 
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [selectMode, setSelectMode] = useState(false);
   const listRef = useRef<FlatList>(null);
+
   const topInset = Platform.OS === "web" ? 48 : insets.top;
   const bottomInset = Platform.OS === "web" ? 90 : insets.bottom;
 
-  const renderItem = ({ item, index }: { item: Song; index: number }) => {
-    const isActive = item.id === currentSong?.id;
-    return (
-      <TouchableOpacity
-        style={[styles.row, isActive && styles.rowActive]}
-        onPress={() => playSong(item, queue, index)}
-        activeOpacity={0.6}
-      >
-        <View style={styles.rowText}>
-          <Text
-            style={[styles.title, isActive && styles.titleActive]}
-            numberOfLines={1}
-          >
-            {item.title}
-          </Text>
-          <Text style={styles.artist} numberOfLines={1}>
-            {item.artist}
-          </Text>
-        </View>
-        {isActive && <View style={styles.activeBar} />}
-      </TouchableOpacity>
+  const exitSelectMode = useCallback(() => {
+    setSelectMode(false);
+    setSelectedIds(new Set());
+  }, []);
+
+  const handleLongPress = useCallback((id: string) => {
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+    setSelectMode(true);
+    setSelectedIds(new Set([id]));
+  }, []);
+
+  const handlePress = useCallback(
+    (item: Song, index: number) => {
+      if (selectMode) {
+        setSelectedIds((prev) => {
+          const next = new Set(prev);
+          if (next.has(item.id)) next.delete(item.id);
+          else next.add(item.id);
+          if (next.size === 0) setSelectMode(false);
+          return next;
+        });
+      } else {
+        playSong(item, queue, index);
+      }
+    },
+    [selectMode, playSong, queue]
+  );
+
+  const handleRemove = useCallback(() => {
+    const count = selectedIds.size;
+    Alert.alert(
+      `Remove ${count} song${count > 1 ? "s" : ""}?`,
+      undefined,
+      [
+        { text: "Cancel", style: "cancel" },
+        {
+          text: "Remove",
+          style: "destructive",
+          onPress: async () => {
+            await removeSongs([...selectedIds]);
+            exitSelectMode();
+          },
+        },
+      ]
     );
-  };
+  }, [selectedIds, removeSongs, exitSelectMode]);
+
+  const renderItem = useCallback(
+    ({ item, index }: { item: Song; index: number }) => {
+      const isActive = item.id === currentSong?.id;
+      const isSelected = selectedIds.has(item.id);
+
+      return (
+        <TouchableOpacity
+          style={[
+            styles.row,
+            isActive && !selectMode && styles.rowActive,
+            isSelected && styles.rowSelected,
+          ]}
+          onPress={() => handlePress(item, index)}
+          onLongPress={() => handleLongPress(item.id)}
+          delayLongPress={350}
+          activeOpacity={0.6}
+        >
+          {selectMode && (
+            <View style={[styles.checkbox, isSelected && styles.checkboxSelected]}>
+              {isSelected && <Check size={11} color="#000" strokeWidth={3} />}
+            </View>
+          )}
+          <View style={styles.rowText}>
+            <Text
+              style={[styles.title, isActive && !selectMode && styles.titleActive]}
+              numberOfLines={1}
+            >
+              {item.title}
+            </Text>
+            <Text style={styles.artist} numberOfLines={1}>
+              {item.artist}
+            </Text>
+          </View>
+          {isActive && !selectMode && <View style={styles.activeBar} />}
+        </TouchableOpacity>
+      );
+    },
+    [currentSong, selectedIds, selectMode, handlePress, handleLongPress]
+  );
 
   return (
     <View style={[styles.container, { paddingTop: topInset }]}>
       <View style={styles.header}>
-        <Text style={styles.headerCount}>
-          {queue.length > 0 ? `${queue.length} songs` : ""}
-        </Text>
+        {selectMode ? (
+          <>
+            <Text style={styles.headerCount}>{selectedIds.size} selected</Text>
+            <TouchableOpacity onPress={exitSelectMode} style={styles.headerBtn}>
+              <Text style={styles.cancelText}>Cancel</Text>
+            </TouchableOpacity>
+          </>
+        ) : (
+          <Text style={styles.headerCount}>
+            {queue.length > 0 ? `${queue.length} songs` : ""}
+          </Text>
+        )}
       </View>
 
       {!isSetupDone || queue.length === 0 ? (
@@ -70,7 +148,7 @@ export default function LibraryScreen() {
           data={queue}
           keyExtractor={(item) => item.id}
           renderItem={renderItem}
-          contentContainerStyle={{ paddingBottom: bottomInset + 16 }}
+          contentContainerStyle={{ paddingBottom: (selectMode ? 80 : 0) + bottomInset + 16 }}
           showsVerticalScrollIndicator={false}
           initialScrollIndex={currentIndex > 2 ? Math.max(0, currentIndex - 2) : 0}
           getItemLayout={(_, index) => ({
@@ -79,6 +157,22 @@ export default function LibraryScreen() {
             index,
           })}
         />
+      )}
+
+      {/* Select mode action bar */}
+      {selectMode && (
+        <View style={[styles.actionBar, { paddingBottom: bottomInset + 8 }]}>
+          <TouchableOpacity
+            style={[styles.removeBtn, selectedIds.size === 0 && styles.removeBtnDisabled]}
+            onPress={handleRemove}
+            disabled={selectedIds.size === 0}
+            activeOpacity={0.7}
+          >
+            <Text style={styles.removeBtnText}>
+              Remove {selectedIds.size > 0 ? selectedIds.size : ""}
+            </Text>
+          </TouchableOpacity>
+        </View>
       )}
     </View>
   );
@@ -89,6 +183,9 @@ const ITEM_HEIGHT = 56;
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: Colors.dark.background },
   header: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
     paddingHorizontal: 24,
     paddingTop: 8,
     paddingBottom: 12,
@@ -100,15 +197,39 @@ const styles = StyleSheet.create({
     letterSpacing: 0.5,
     textTransform: "uppercase",
   },
+  headerBtn: { paddingVertical: 4 },
+  cancelText: {
+    color: Colors.dark.textSecondary,
+    fontSize: 14,
+    fontFamily: "Inter_400Regular",
+  },
   row: {
     flexDirection: "row",
     alignItems: "center",
     paddingHorizontal: 24,
     paddingVertical: 10,
     height: ITEM_HEIGHT,
+    gap: 14,
   },
   rowActive: {
     backgroundColor: "rgba(255,255,255,0.04)",
+  },
+  rowSelected: {
+    backgroundColor: "rgba(108,99,255,0.08)",
+  },
+  checkbox: {
+    width: 20,
+    height: 20,
+    borderRadius: 10,
+    borderWidth: 1.5,
+    borderColor: Colors.dark.textTertiary,
+    alignItems: "center",
+    justifyContent: "center",
+    flexShrink: 0,
+  },
+  checkboxSelected: {
+    backgroundColor: Colors.dark.accent,
+    borderColor: Colors.dark.accent,
   },
   rowText: { flex: 1 },
   title: {
@@ -130,7 +251,6 @@ const styles = StyleSheet.create({
     height: 18,
     borderRadius: 2,
     backgroundColor: Colors.dark.accent,
-    marginLeft: 12,
   },
   empty: {
     flex: 1,
@@ -143,5 +263,28 @@ const styles = StyleSheet.create({
     color: Colors.dark.textTertiary,
     fontSize: 15,
     fontFamily: "Inter_400Regular",
+  },
+  actionBar: {
+    position: "absolute",
+    bottom: 52,
+    left: 0,
+    right: 0,
+    paddingHorizontal: 24,
+    paddingTop: 12,
+    backgroundColor: Colors.dark.background,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: Colors.dark.border,
+  },
+  removeBtn: {
+    backgroundColor: Colors.dark.danger,
+    borderRadius: 4,
+    paddingVertical: 14,
+    alignItems: "center",
+  },
+  removeBtnDisabled: { opacity: 0.4 },
+  removeBtnText: {
+    color: "#fff",
+    fontSize: 15,
+    fontFamily: "Inter_600SemiBold",
   },
 });

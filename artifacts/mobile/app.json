@@ -65,6 +65,14 @@
         {
           "photosPermission": "Allow $(PRODUCT_NAME) to access your photo library to use images as artwork."
         }
+      ],
+      [
+        "expo-media-library",
+        {
+          "photosPermission": "Allow $(PRODUCT_NAME) to read your music library.",
+          "savePhotosPermission": false,
+          "isAccessMediaLocationEnabled": true
+        }
       ]
     ],
     "experiments": {

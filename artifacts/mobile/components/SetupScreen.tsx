@@ -1,4 +1,4 @@
-import { Folder, Music2 } from "lucide-react-native";
+import { ScanSearch } from "lucide-react-native";
 import React from "react";
 import {
   ActivityIndicator,
@@ -12,24 +12,23 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import Colors from "@/constants/colors";
 
 type Props = {
-  onPickFolder: () => Promise<boolean>;
+  onScan: () => Promise<boolean>;
   isLoading: boolean;
-  safAvailable: boolean;
 };
 
-export function SetupScreen({ onPickFolder, isLoading }: Props) {
+export function SetupScreen({ onScan, isLoading }: Props) {
   const insets = useSafeAreaInsets();
   const topInset = Platform.OS === "web" ? 48 : insets.top;
   const bottomInset = Platform.OS === "web" ? 90 : insets.bottom;
 
   return (
     <View style={[styles.container, { paddingTop: topInset, paddingBottom: bottomInset }]}>
-      <Music2 size={48} color={Colors.dark.textTertiary} />
+      <ScanSearch size={48} color={Colors.dark.textTertiary} />
       <Text style={styles.title}>Music Player</Text>
 
       <TouchableOpacity
         style={[styles.button, isLoading && { opacity: 0.5 }]}
-        onPress={onPickFolder}
+        onPress={onScan}
         activeOpacity={0.7}
         disabled={isLoading}
       >
@@ -37,8 +36,8 @@ export function SetupScreen({ onPickFolder, isLoading }: Props) {
           <ActivityIndicator color={Colors.dark.background} />
         ) : (
           <>
-            <Folder size={20} color={Colors.dark.background} />
-            <Text style={styles.buttonText}>Choose music folder</Text>
+            <ScanSearch size={20} color={Colors.dark.background} />
+            <Text style={styles.buttonText}>Scan device</Text>
           </>
         )}
       </TouchableOpacity>

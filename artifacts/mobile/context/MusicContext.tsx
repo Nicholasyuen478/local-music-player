@@ -1,9 +1,8 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import createContextHook from "@nkzw/create-context-hook";
 import { useAudioPlayer, useAudioPlayerStatus, setAudioModeAsync } from "expo-audio";
-import * as DocumentPicker from "expo-document-picker";
-import * as FileSystem from "expo-file-system";
 import * as ImagePicker from "expo-image-picker";
+import * as MediaLibrary from "expo-media-library";
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import { getDefaultArtworkUris } from "@/constants/defaultArtworks";
 
@@ -17,22 +16,36 @@ export type Song = {
 };
 
 const STORAGE_KEYS = {
-  MUSIC_FOLDER: "music_folder_uri",
   SONGS: "cached_songs",
   IMAGE_POOL: "image_pool",
-  IMAGE_POOL_CUSTOM: "image_pool_custom",   // tracks user-added URIs separately
+  IMAGE_POOL_CUSTOM: "image_pool_custom",
   IMAGE_FOLDER: "image_folder_uri",
   QUEUE: "playback_queue",
   CURRENT_INDEX: "current_index",
   SHUFFLE: "shuffle_enabled",
 };
 
-// SAF is only available in real native builds, not Expo Go
-const SAF = FileSystem.StorageAccessFramework;
-const SAF_AVAILABLE = !!SAF && typeof SAF?.requestDirectoryPermissionsAsync === "function";
-
 const AUDIO_EXTENSIONS = [".mp3", ".m4a", ".aac", ".ogg", ".flac", ".wav", ".opus", ".wma"];
 const IMAGE_EXTENSIONS = [".jpg", ".jpeg", ".png", ".webp", ".gif", ".avif"];
+
+// Paths that indicate a system sound (ringtone, notification, alarm, etc.)
+const SKIP_PATH_FRAGMENTS = [
+  "/ringtones/",
+  "/ringtone/",
+  "/notifications/",
+  "/notification/",
+  "/alarms/",
+  "/alarm/",
+  "system/media",
+  "system/sounds",
+  "/android/media/",
+  "com.android",
+  "/soundfx/",
+  "/ui/",
+];
+
+// Minimum duration to be considered music (skip short sound effects)
+const MIN_DURATION_SECS = 30;
 
 function parseSongMeta(filename: string, uri: string, duration?: number): Song {
   const nameWithoutExt = filename.replace(/\.[^/.]+$/, "");
@@ -42,43 +55,41 @@ function parseSongMeta(filename: string, uri: string, duration?: number): Song {
   return { id: uri, title, artist, uri, filename, duration };
 }
 
-async function scanMusicFolderSAF(folderUri: string): Promise<Song[]> {
-  try {
-    const files = await SAF.readDirectoryAsync(folderUri);
-    const songs: Song[] = [];
-    for (const fileUri of files) {
-      const lower = fileUri.toLowerCase();
-      if (AUDIO_EXTENSIONS.some((ext) => lower.endsWith(ext))) {
-        const filename = decodeURIComponent(
-          fileUri.split("%2F").pop() || fileUri.split("/").pop() || fileUri
-        );
-        songs.push(parseSongMeta(filename, fileUri));
-      }
-    }
-    return songs;
-  } catch (e) {
-    console.error("SAF scan error", e);
-    return [];
-  }
-}
+async function scanDeviceAudio(): Promise<Song[]> {
+  const { status } = await MediaLibrary.requestPermissionsAsync();
+  if (status !== "granted") return [];
 
-async function pickAudioViaDocumentPicker(): Promise<Song[]> {
-  const result = await DocumentPicker.getDocumentAsync({
-    // audio/* tells the OS file picker to filter to audio files only
-    type: ["audio/*"],
-    multiple: true,
-    copyToCacheDirectory: false,
-  });
-  if (result.canceled || !result.assets || result.assets.length === 0) return [];
-  return result.assets
-    .filter((a) => {
-      const name = (a.name || a.uri).toLowerCase();
-      return AUDIO_EXTENSIONS.some((ext) => name.endsWith(ext));
-    })
-    .map((a) => {
-      const filename = a.name || a.uri.split("/").pop() || "Unknown";
-      return parseSongMeta(filename, a.uri);
+  const songs: Song[] = [];
+  let hasMore = true;
+  let cursor: string | undefined;
+
+  while (hasMore) {
+    const page = await MediaLibrary.getAssetsAsync({
+      mediaType: MediaLibrary.MediaType.audio,
+      first: 300,
+      after: cursor,
     });
+
+    for (const asset of page.assets) {
+      // Skip very short files — sound effects, notifications, UI sounds
+      if ((asset.duration ?? 0) < MIN_DURATION_SECS) continue;
+
+      // Skip system/notification/ringtone paths
+      const uriLower = asset.uri.toLowerCase();
+      if (SKIP_PATH_FRAGMENTS.some((frag) => uriLower.includes(frag))) continue;
+
+      // Skip unsupported extensions
+      const fn = asset.filename.toLowerCase();
+      if (!AUDIO_EXTENSIONS.some((ext) => fn.endsWith(ext))) continue;
+
+      songs.push(parseSongMeta(asset.filename, asset.uri, asset.duration));
+    }
+
+    hasMore = page.hasNextPage;
+    cursor = page.endCursor;
+  }
+
+  return songs;
 }
 
 async function pickImagesViaGallery(): Promise<string[]> {
@@ -104,7 +115,6 @@ function shuffleArray<T>(arr: T[]): T[] {
 }
 
 const [MusicContextProvider, useMusicContext] = createContextHook(() => {
-  const [musicFolderUri, setMusicFolderUri] = useState<string | null>(null);
   const [songs, setSongs] = useState<Song[]>([]);
   const [queue, setQueue] = useState<Song[]>([]);
   const [currentIndex, setCurrentIndex] = useState<number>(0);
@@ -113,7 +123,6 @@ const [MusicContextProvider, useMusicContext] = createContextHook(() => {
   const [imagePool, setImagePool] = useState<string[]>([]);
   const [imageFolderUri, setImageFolderUri] = useState<string | null>(null);
   const [isSetupDone, setIsSetupDone] = useState(false);
-  // Whether the user has ever explicitly picked an image folder / added custom images
   const [hasCustomImages, setHasCustomImages] = useState(false);
 
   const player = useAudioPlayer(null);
@@ -136,9 +145,8 @@ const [MusicContextProvider, useMusicContext] = createContextHook(() => {
   async function loadPersistedData() {
     setIsLoading(true);
     try {
-      const [folderUri, cachedSongs, pool, customFlag, imgFolder, savedQueue, savedIndex, savedShuffle] =
+      const [cachedSongs, pool, customFlag, imgFolder, savedQueue, savedIndex, savedShuffle] =
         await Promise.all([
-          AsyncStorage.getItem(STORAGE_KEYS.MUSIC_FOLDER),
           AsyncStorage.getItem(STORAGE_KEYS.SONGS),
           AsyncStorage.getItem(STORAGE_KEYS.IMAGE_POOL),
           AsyncStorage.getItem(STORAGE_KEYS.IMAGE_POOL_CUSTOM),
@@ -148,18 +156,15 @@ const [MusicContextProvider, useMusicContext] = createContextHook(() => {
           AsyncStorage.getItem(STORAGE_KEYS.SHUFFLE),
         ]);
 
-      if (folderUri) setMusicFolderUri(folderUri);
       if (imgFolder) setImageFolderUri(imgFolder);
       if (savedShuffle) setShuffleEnabled(savedShuffle === "true");
       if (customFlag === "true") setHasCustomImages(true);
 
-      // Image pool: load saved or fall back to bundled defaults
       if (pool) {
         setImagePool(JSON.parse(pool));
       } else {
         const defaults = await getDefaultArtworkUris();
         setImagePool(defaults);
-        // Don't persist defaults — they get re-resolved fresh each launch
       }
 
       if (cachedSongs) {
@@ -169,15 +174,12 @@ const [MusicContextProvider, useMusicContext] = createContextHook(() => {
         setSongs(parsed);
         setQueue(q);
         setCurrentIndex(idx);
-        // Pre-load the current song into the player so pressing play works immediately
         const song = q[idx];
         if (song?.uri) {
           player.replace({ uri: song.uri });
-          // Don't auto-play — let the user initiate
         }
+        setIsSetupDone(true);
       }
-
-      setIsSetupDone(!!folderUri && !!cachedSongs);
     } catch (e) {
       console.error("load error", e);
     } finally {
@@ -185,107 +187,94 @@ const [MusicContextProvider, useMusicContext] = createContextHook(() => {
     }
   }
 
-  // ── Music setup ──────────────────────────────────────────────────────────
+  // ── Device scan ──────────────────────────────────────────────────────────
+  // Run once on first launch (manual trigger), can be re-triggered manually.
+  // Does NOT run automatically on every restart.
 
-  const pickMusicFolder = useCallback(async (): Promise<boolean> => {
-    try {
-      if (SAF_AVAILABLE) {
-        const perm = await SAF.requestDirectoryPermissionsAsync();
-        if (!perm.granted) return false;
-        const folderUri = perm.directoryUri;
-        const found = await scanMusicFolderSAF(folderUri);
-        if (found.length === 0) return false;
-        setMusicFolderUri(folderUri);
-        setSongs(found);
-        setQueue(found);
-        setCurrentIndex(0);
-        setIsSetupDone(true);
-        await Promise.all([
-          AsyncStorage.setItem(STORAGE_KEYS.MUSIC_FOLDER, folderUri),
-          AsyncStorage.setItem(STORAGE_KEYS.SONGS, JSON.stringify(found)),
-          AsyncStorage.setItem(STORAGE_KEYS.QUEUE, JSON.stringify(found)),
-          AsyncStorage.setItem(STORAGE_KEYS.CURRENT_INDEX, "0"),
-        ]);
-        return true;
-      } else {
-        const found = await pickAudioViaDocumentPicker();
-        if (found.length === 0) return false;
-        setMusicFolderUri("picker");
-        setSongs(found);
-        setQueue(found);
-        setCurrentIndex(0);
-        setIsSetupDone(true);
-        player.replace({ uri: found[0].uri });
-        await Promise.all([
-          AsyncStorage.setItem(STORAGE_KEYS.MUSIC_FOLDER, "picker"),
-          AsyncStorage.setItem(STORAGE_KEYS.SONGS, JSON.stringify(found)),
-          AsyncStorage.setItem(STORAGE_KEYS.QUEUE, JSON.stringify(found)),
-          AsyncStorage.setItem(STORAGE_KEYS.CURRENT_INDEX, "0"),
-        ]);
-        return true;
-      }
-    } catch (e) {
-      console.error("pickMusicFolder error", e);
-      return false;
-    }
-  }, [player]);
-
-  const addMoreSongs = useCallback(async () => {
-    try {
-      const found = await pickAudioViaDocumentPicker();
-      if (found.length === 0) return;
-      const merged = [...songs];
-      for (const s of found) {
-        if (!merged.find((x) => x.uri === s.uri)) merged.push(s);
-      }
-      setSongs(merged);
-      setQueue(merged);
-      await Promise.all([
-        AsyncStorage.setItem(STORAGE_KEYS.SONGS, JSON.stringify(merged)),
-        AsyncStorage.setItem(STORAGE_KEYS.QUEUE, JSON.stringify(merged)),
-      ]);
-    } catch (e) {
-      console.error("addMoreSongs error", e);
-    }
-  }, [songs]);
-
-  const rescanFolder = useCallback(async () => {
-    if (!musicFolderUri) return;
+  const scanDeviceMusic = useCallback(async (): Promise<boolean> => {
     setIsLoading(true);
     try {
-      if (SAF_AVAILABLE && musicFolderUri.startsWith("content://")) {
-        const found = await scanMusicFolderSAF(musicFolderUri);
-        // Merge: keep existing songs, add any new ones found in the folder
-        setSongs((prev) => {
-          const merged = [...prev];
-          for (const s of found) {
-            if (!merged.find((x) => x.uri === s.uri)) merged.push(s);
-          }
-          const next = merged;
-          AsyncStorage.setItem(STORAGE_KEYS.SONGS, JSON.stringify(next));
-          AsyncStorage.setItem(STORAGE_KEYS.QUEUE, JSON.stringify(next));
-          setQueue(next);
-          return next;
-        });
-      } else {
-        await addMoreSongs();
-      }
+      const found = await scanDeviceAudio();
+      if (found.length === 0) return false;
+
+      // Merge with existing songs (add new, keep existing)
+      setSongs((prev) => {
+        const merged = [...prev];
+        for (const s of found) {
+          if (!merged.find((x) => x.uri === s.uri)) merged.push(s);
+        }
+        const next = merged;
+        AsyncStorage.setItem(STORAGE_KEYS.SONGS, JSON.stringify(next));
+        AsyncStorage.setItem(STORAGE_KEYS.QUEUE, JSON.stringify(next));
+        setQueue(next);
+        const newIdx = 0;
+        setCurrentIndex(newIdx);
+        AsyncStorage.setItem(STORAGE_KEYS.CURRENT_INDEX, "0");
+        if (next[0]?.uri) {
+          player.replace({ uri: next[0].uri });
+        }
+        return next;
+      });
+
+      setIsSetupDone(true);
+      return true;
     } catch (e) {
-      console.error("rescanFolder error", e);
+      console.error("scanDeviceMusic error", e);
+      return false;
     } finally {
       setIsLoading(false);
     }
-  }, [musicFolderUri, addMoreSongs]);
+  }, [player]);
+
+  const removeSongs = useCallback(
+    async (ids: string[]) => {
+      const idSet = new Set(ids);
+      const newSongs = songs.filter((s) => !idSet.has(s.id));
+      const newQueue = queue.filter((s) => !idSet.has(s.id));
+
+      let newIdx = currentIndex;
+      if (idSet.has(currentSong?.id ?? "")) {
+        newIdx = 0;
+      } else {
+        newIdx = newQueue.findIndex((s) => s.id === currentSong?.id);
+        if (newIdx < 0) newIdx = 0;
+      }
+
+      setSongs(newSongs);
+      setQueue(newQueue);
+      setCurrentIndex(newIdx);
+
+      if (newSongs.length === 0) {
+        setIsSetupDone(false);
+        await Promise.all([
+          AsyncStorage.removeItem(STORAGE_KEYS.SONGS),
+          AsyncStorage.removeItem(STORAGE_KEYS.QUEUE),
+          AsyncStorage.removeItem(STORAGE_KEYS.CURRENT_INDEX),
+        ]);
+        return;
+      }
+
+      const newCurrentSong = newQueue[newIdx];
+      if (idSet.has(currentSong?.id ?? "") && newCurrentSong?.uri) {
+        player.replace({ uri: newCurrentSong.uri });
+      }
+
+      await Promise.all([
+        AsyncStorage.setItem(STORAGE_KEYS.SONGS, JSON.stringify(newSongs)),
+        AsyncStorage.setItem(STORAGE_KEYS.QUEUE, JSON.stringify(newQueue)),
+        AsyncStorage.setItem(STORAGE_KEYS.CURRENT_INDEX, String(newIdx)),
+      ]);
+    },
+    [songs, queue, currentIndex, currentSong, player]
+  );
 
   const resetSetup = useCallback(async () => {
     await Promise.all([
-      AsyncStorage.removeItem(STORAGE_KEYS.MUSIC_FOLDER),
       AsyncStorage.removeItem(STORAGE_KEYS.SONGS),
       AsyncStorage.removeItem(STORAGE_KEYS.QUEUE),
       AsyncStorage.removeItem(STORAGE_KEYS.CURRENT_INDEX),
     ]);
     setIsSetupDone(false);
-    setMusicFolderUri(null);
     setSongs([]);
     setQueue([]);
     setCurrentIndex(0);
@@ -348,7 +337,6 @@ const [MusicContextProvider, useMusicContext] = createContextHook(() => {
     await AsyncStorage.setItem(STORAGE_KEYS.QUEUE, JSON.stringify(newOrder));
   }, [shuffleEnabled, songs, currentSong]);
 
-  // Fix: use a ref so the didJustFinish effect always calls the latest playNext
   const playNextRef = useRef(playNext);
   useEffect(() => { playNextRef.current = playNext; }, [playNext]);
 
@@ -384,21 +372,6 @@ const [MusicContextProvider, useMusicContext] = createContextHook(() => {
 
   const pickImageFolder = useCallback(async () => {
     try {
-      if (SAF_AVAILABLE) {
-        const perm = await SAF.requestDirectoryPermissionsAsync();
-        if (perm.granted) {
-          setImageFolderUri(perm.directoryUri);
-          await AsyncStorage.setItem(STORAGE_KEYS.IMAGE_FOLDER, perm.directoryUri);
-          const files = await SAF.readDirectoryAsync(perm.directoryUri);
-          const imgs = files.filter((f) =>
-            IMAGE_EXTENSIONS.some((ext) => f.toLowerCase().endsWith(ext))
-          );
-          if (imgs.length > 0) {
-            await addImagesToPool(imgs, true);
-            return true;
-          }
-        }
-      }
       const uris = await pickImagesViaGallery();
       if (uris.length > 0) {
         await addImagesToPool(uris, true);
@@ -414,7 +387,6 @@ const [MusicContextProvider, useMusicContext] = createContextHook(() => {
   const seekTo = useCallback((secs: number) => { player.seekTo(secs); }, [player]);
 
   return {
-    musicFolderUri,
     songs,
     queue,
     currentIndex,
@@ -427,10 +399,8 @@ const [MusicContextProvider, useMusicContext] = createContextHook(() => {
     hasCustomImages,
     status,
     player,
-    SAF_AVAILABLE,
-    pickMusicFolder,
-    addMoreSongs,
-    rescanFolder,
+    scanDeviceMusic,
+    removeSongs,
     resetSetup,
     playSong,
     togglePlayPause,

@@ -1,10 +1,8 @@
 import * as Haptics from "expo-haptics";
 import {
-  List,
   Pause,
   Play,
-  PlusCircle,
-  RefreshCw,
+  ScanSearch,
   Shuffle,
   SkipBack,
   SkipForward,
@@ -34,12 +32,11 @@ const SWIPE_THRESHOLD = 60;
 export default function PlayerScreen() {
   const insets = useSafeAreaInsets();
   const { width } = useWindowDimensions();
-  const [isPickingFolder, setIsPickingFolder] = useState(false);
+  const [isScanning, setIsScanning] = useState(false);
 
   const {
     currentSong,
     queue,
-    currentIndex,
     songs,
     shuffleEnabled,
     status,
@@ -47,10 +44,7 @@ export default function PlayerScreen() {
     isLoading,
     isSetupDone,
     hasCustomImages,
-    SAF_AVAILABLE,
-    pickMusicFolder,
-    addMoreSongs,
-    rescanFolder,
+    scanDeviceMusic,
     resetSetup,
     pickImageFolder,
     togglePlayPause,
@@ -149,36 +143,28 @@ export default function PlayerScreen() {
     })
   ).current;
 
-  // ── Folder pick ───────────────────────────────────────────────────────
-  const handlePickFolder = useCallback(async () => {
-    setIsPickingFolder(true);
+  // ── Scan handler ────────────────────────────────────────────────────────
+  const handleScan = useCallback(async () => {
+    setIsScanning(true);
     try {
-      const success = await pickMusicFolder();
+      const success = await scanDeviceMusic();
       if (success && !hasCustomImages) {
         Alert.alert(
           "Add artwork",
-          "Pick a folder of images to use as song artwork?",
+          "Pick images from your gallery to use as song artwork?",
           [
             { text: "Skip", style: "cancel" },
-            {
-              text: "Pick folder",
-              onPress: async () => { await pickImageFolder(); },
-            },
+            { text: "Choose images", onPress: async () => { await pickImageFolder(); } },
           ]
         );
       }
     } catch (e) {
-      console.error("handlePickFolder error", e);
+      console.error("scan error", e);
     } finally {
-      setIsPickingFolder(false);
+      setIsScanning(false);
     }
     return true;
-  }, [pickMusicFolder, pickImageFolder, hasCustomImages]);
-
-  const handleTopAction = useCallback(() => {
-    if (SAF_AVAILABLE) rescanFolder();
-    else addMoreSongs();
-  }, [SAF_AVAILABLE, rescanFolder, addMoreSongs]);
+  }, [scanDeviceMusic, pickImageFolder, hasCustomImages]);
 
   const handlePlayPause = useCallback(() => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
@@ -203,9 +189,8 @@ export default function PlayerScreen() {
   if (!isSetupDone) {
     return (
       <SetupScreen
-        onPickFolder={handlePickFolder}
-        isLoading={isPickingFolder || isLoading}
-        safAvailable={SAF_AVAILABLE}
+        onScan={handleScan}
+        isLoading={isScanning || isLoading}
       />
     );
   }
@@ -218,11 +203,13 @@ export default function PlayerScreen() {
         <TouchableOpacity onPress={handleClearAll} style={styles.iconBtn} activeOpacity={0.6}>
           <Trash2 size={18} color={Colors.dark.textTertiary} />
         </TouchableOpacity>
-        <TouchableOpacity onPress={handleTopAction} style={styles.iconBtn} activeOpacity={0.6}>
-          {SAF_AVAILABLE
-            ? <RefreshCw size={18} color={Colors.dark.textTertiary} />
-            : <PlusCircle size={18} color={Colors.dark.textTertiary} />
-          }
+        <TouchableOpacity
+          onPress={handleScan}
+          style={styles.iconBtn}
+          activeOpacity={0.6}
+          disabled={isScanning}
+        >
+          <ScanSearch size={18} color={isScanning ? Colors.dark.accent : Colors.dark.textTertiary} />
         </TouchableOpacity>
       </View>
 
@@ -255,7 +242,7 @@ export default function PlayerScreen() {
             {currentSong?.title ?? (songs.length > 0 ? "—" : "No songs")}
           </Text>
           <Text style={styles.songArtist} numberOfLines={1}>
-            {currentSong?.artist ?? (songs.length > 0 ? `${songs.length} songs` : "Add songs to start")}
+            {currentSong?.artist ?? (songs.length > 0 ? `${songs.length} songs` : "")}
           </Text>
         </View>
         <TouchableOpacity onPress={handleShuffle} style={styles.shuffleBtn} activeOpacity={0.7}>
