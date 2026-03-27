@@ -18,7 +18,6 @@ import { SongArtwork } from "@/components/SongArtwork";
 import { SeekBar } from "@/components/SeekBar";
 import { SetupScreen } from "@/components/SetupScreen";
 import { QueueSheet } from "@/components/QueueSheet";
-import { AlbumPickerModal } from "@/components/AlbumPickerModal";
 
 export default function PlayerScreen() {
   const insets = useSafeAreaInsets();
@@ -37,16 +36,9 @@ export default function PlayerScreen() {
     isLoading,
     isSetupDone,
     SAF_AVAILABLE,
-    albums,
-    showAlbumPicker,
-    albumPermissionDenied,
-    isScanningAlbum,
     pickMusicFolder,
-    selectAlbum,
-    dismissAlbumPicker,
-    openAppSettings,
+    addMoreSongs,
     rescanFolder,
-    changeFolder,
     togglePlayPause,
     playNext,
     playPrev,
@@ -56,6 +48,8 @@ export default function PlayerScreen() {
   } = useMusicContext();
 
   const artSize = Math.min(width - 64, 320);
+  const topInset = Platform.OS === "web" ? 67 : insets.top;
+  const bottomInset = Platform.OS === "web" ? 34 : insets.bottom;
 
   const handlePickFolder = useCallback(async () => {
     setIsPickingFolder(true);
@@ -68,6 +62,12 @@ export default function PlayerScreen() {
     }
     return true;
   }, [pickMusicFolder]);
+
+  const handleTopAction = useCallback(() => {
+    // Real APK: refresh the folder. Expo Go: add more files from picker.
+    if (SAF_AVAILABLE) rescanFolder();
+    else addMoreSongs();
+  }, [SAF_AVAILABLE, rescanFolder, addMoreSongs]);
 
   const handlePlayPause = useCallback(() => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
@@ -89,28 +89,13 @@ export default function PlayerScreen() {
     toggleShuffle();
   }, [toggleShuffle]);
 
-  const topInset = Platform.OS === "web" ? 67 : insets.top;
-  const bottomInset = Platform.OS === "web" ? 34 : insets.bottom;
-
   if (!isSetupDone) {
     return (
-      <>
-        <SetupScreen
-          onPickFolder={handlePickFolder}
-          isLoading={isPickingFolder || isLoading}
-          safAvailable={SAF_AVAILABLE}
-        />
-        {/* Album picker modal opens on top of setup screen in Expo Go */}
-        <AlbumPickerModal
-          visible={showAlbumPicker}
-          albums={albums}
-          permissionDenied={albumPermissionDenied}
-          isScanning={isScanningAlbum}
-          onSelectAlbum={selectAlbum}
-          onDismiss={dismissAlbumPicker}
-          onOpenSettings={openAppSettings}
-        />
-      </>
+      <SetupScreen
+        onPickFolder={handlePickFolder}
+        isLoading={isPickingFolder || isLoading}
+        safAvailable={SAF_AVAILABLE}
+      />
     );
   }
 
@@ -122,13 +107,9 @@ export default function PlayerScreen() {
       />
 
       <View style={styles.topBar}>
-        <TouchableOpacity
-          onPress={SAF_AVAILABLE ? rescanFolder : changeFolder}
-          style={styles.iconButton}
-          activeOpacity={0.7}
-        >
+        <TouchableOpacity onPress={handleTopAction} style={styles.iconButton} activeOpacity={0.7}>
           <Feather
-            name={SAF_AVAILABLE ? "refresh-cw" : "folder"}
+            name={SAF_AVAILABLE ? "refresh-cw" : "plus-circle"}
             size={20}
             color={Colors.dark.textSecondary}
           />
@@ -159,7 +140,7 @@ export default function PlayerScreen() {
         ) : (
           <>
             <Text style={styles.songTitle}>No song selected</Text>
-            <Text style={styles.songArtist}>Pick a song from the queue</Text>
+            <Text style={styles.songArtist}>{songs.length} songs loaded — tap one in the queue</Text>
           </>
         )}
       </View>
@@ -249,26 +230,12 @@ export default function PlayerScreen() {
           Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
         }}
       />
-
-      {/* Album picker — also accessible from the player via the folder button */}
-      <AlbumPickerModal
-        visible={showAlbumPicker}
-        albums={albums}
-        permissionDenied={albumPermissionDenied}
-        isScanning={isScanningAlbum}
-        onSelectAlbum={selectAlbum}
-        onDismiss={dismissAlbumPicker}
-        onOpenSettings={openAppSettings}
-      />
     </View>
   );
 }
 
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: Colors.dark.background,
-  },
+  container: { flex: 1, backgroundColor: Colors.dark.background },
   topBar: {
     flexDirection: "row",
     alignItems: "center",
@@ -283,17 +250,8 @@ const styles = StyleSheet.create({
     letterSpacing: 0.5,
     textTransform: "uppercase",
   },
-  iconButton: {
-    width: 36,
-    height: 36,
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  artWrapper: {
-    alignItems: "center",
-    paddingHorizontal: 32,
-    paddingVertical: 12,
-  },
+  iconButton: { width: 36, height: 36, alignItems: "center", justifyContent: "center" },
+  artWrapper: { alignItems: "center", paddingHorizontal: 32, paddingVertical: 12 },
   artShadow: {
     shadowColor: Colors.dark.accent,
     shadowOffset: { width: 0, height: 16 },
@@ -301,26 +259,10 @@ const styles = StyleSheet.create({
     shadowRadius: 28,
     elevation: 16,
   },
-  infoSection: {
-    paddingHorizontal: 32,
-    marginTop: 20,
-    marginBottom: 8,
-    gap: 6,
-  },
-  songTitle: {
-    color: Colors.dark.text,
-    fontSize: 22,
-    fontFamily: "Inter_700Bold",
-  },
-  songArtist: {
-    color: Colors.dark.textSecondary,
-    fontSize: 15,
-    fontFamily: "Inter_400Regular",
-  },
-  seekSection: {
-    paddingHorizontal: 28,
-    marginVertical: 8,
-  },
+  infoSection: { paddingHorizontal: 32, marginTop: 20, marginBottom: 8, gap: 6 },
+  songTitle: { color: Colors.dark.text, fontSize: 22, fontFamily: "Inter_700Bold" },
+  songArtist: { color: Colors.dark.textSecondary, fontSize: 15, fontFamily: "Inter_400Regular" },
+  seekSection: { paddingHorizontal: 28, marginVertical: 8 },
   controls: {
     flexDirection: "row",
     alignItems: "center",
@@ -329,19 +271,11 @@ const styles = StyleSheet.create({
     marginTop: 12,
     marginBottom: 16,
   },
-  controlIconBtn: {
-    width: 44,
-    height: 44,
-    alignItems: "center",
-    justifyContent: "center",
-  },
+  controlIconBtn: { width: 44, height: 44, alignItems: "center", justifyContent: "center" },
   activeDot: {
-    width: 4,
-    height: 4,
-    borderRadius: 2,
+    width: 4, height: 4, borderRadius: 2,
     backgroundColor: Colors.dark.accent,
-    position: "absolute",
-    bottom: 6,
+    position: "absolute", bottom: 6,
   },
   playBtn: {
     shadowColor: Colors.dark.accent,
@@ -351,11 +285,8 @@ const styles = StyleSheet.create({
     elevation: 10,
   },
   playBtnGradient: {
-    width: 72,
-    height: 72,
-    borderRadius: 36,
-    alignItems: "center",
-    justifyContent: "center",
+    width: 72, height: 72, borderRadius: 36,
+    alignItems: "center", justifyContent: "center",
   },
   queuePreview: {
     flex: 1,
@@ -373,31 +304,15 @@ const styles = StyleSheet.create({
     marginBottom: 10,
   },
   miniSongRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 12,
-    paddingVertical: 8,
-    borderRadius: 10,
-    paddingHorizontal: 4,
+    flexDirection: "row", alignItems: "center",
+    gap: 12, paddingVertical: 8,
+    borderRadius: 10, paddingHorizontal: 4,
   },
-  miniSongInfo: {
-    flex: 1,
-  },
-  miniSongTitle: {
-    color: Colors.dark.textSecondary,
-    fontSize: 14,
-    fontFamily: "Inter_500Medium",
-  },
-  miniSongArtist: {
-    color: Colors.dark.textTertiary,
-    fontSize: 12,
-    fontFamily: "Inter_400Regular",
-  },
+  miniSongInfo: { flex: 1 },
+  miniSongTitle: { color: Colors.dark.textSecondary, fontSize: 14, fontFamily: "Inter_500Medium" },
+  miniSongArtist: { color: Colors.dark.textTertiary, fontSize: 12, fontFamily: "Inter_400Regular" },
   emptyQueue: {
-    color: Colors.dark.textTertiary,
-    fontSize: 13,
-    fontFamily: "Inter_400Regular",
-    textAlign: "center",
-    marginTop: 8,
+    color: Colors.dark.textTertiary, fontSize: 13,
+    fontFamily: "Inter_400Regular", textAlign: "center", marginTop: 8,
   },
 });

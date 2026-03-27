@@ -1,4 +1,4 @@
-import { Ionicons, Feather } from "@expo/vector-icons";
+import { Feather, Ionicons } from "@expo/vector-icons";
 import { LinearGradient } from "expo-linear-gradient";
 import React from "react";
 import {
@@ -18,6 +18,18 @@ type Props = {
   safAvailable: boolean;
 };
 
+type StepProps = { num: string; text: string };
+function Step({ num, text }: StepProps) {
+  return (
+    <View style={styles.step}>
+      <View style={styles.stepBadge}>
+        <Text style={styles.stepNum}>{num}</Text>
+      </View>
+      <Text style={styles.stepText}>{text}</Text>
+    </View>
+  );
+}
+
 export function SetupScreen({ onPickFolder, isLoading, safAvailable }: Props) {
   const insets = useSafeAreaInsets();
   const topInset = Platform.OS === "web" ? 67 : insets.top;
@@ -28,6 +40,7 @@ export function SetupScreen({ onPickFolder, isLoading, safAvailable }: Props) {
       colors={[Colors.dark.background, Colors.dark.backgroundSecondary]}
       style={[styles.container, { paddingTop: topInset + 20, paddingBottom: bottomInset + 20 }]}
     >
+      {/* Icon */}
       <View style={styles.iconWrapper}>
         <LinearGradient
           colors={[Colors.dark.accent, Colors.dark.accentDark]}
@@ -38,15 +51,22 @@ export function SetupScreen({ onPickFolder, isLoading, safAvailable }: Props) {
       </View>
 
       <Text style={styles.title}>Music Player</Text>
+      <Text style={styles.subtitle}>
+        {safAvailable
+          ? "Tap below to choose a music folder — all songs inside will be loaded automatically."
+          : "Tap below to open your file browser and select your music files."}
+      </Text>
 
-      {safAvailable ? (
-        <Text style={styles.subtitle}>
-          Pick a folder on your device and all music inside will be loaded automatically.
-        </Text>
-      ) : (
-        <Text style={styles.subtitle}>
-          Choose a folder from your device — all music inside will load automatically.
-        </Text>
+      {/* Step-by-step guide for Expo Go file picker */}
+      {!safAvailable && (
+        <View style={styles.stepsCard}>
+          <Text style={styles.stepsTitle}>How to load your music folder:</Text>
+          <Step num="1" text="Tap the button below to open the file browser" />
+          <Step num="2" text='Navigate to your music folder (e.g. "Music" or "Downloads")' />
+          <Step num="3" text="Long-press any file to enter selection mode" />
+          <Step num="4" text='Tap ⋮ → "Select all" to select every file in the folder' />
+          <Step num="5" text='Tap "Open" — all songs load automatically' />
+        </View>
       )}
 
       <TouchableOpacity
@@ -72,21 +92,14 @@ export function SetupScreen({ onPickFolder, isLoading, safAvailable }: Props) {
                 style={{ marginRight: 10 }}
               />
               <Text style={styles.buttonText}>
-                {safAvailable ? "Choose Music Folder" : "Select Music Files"}
+                {safAvailable ? "Choose Music Folder" : "Open File Browser"}
               </Text>
             </>
           )}
         </LinearGradient>
       </TouchableOpacity>
 
-      <View style={styles.tipBox}>
-        <Feather name="info" size={14} color={Colors.dark.textTertiary} style={{ marginRight: 8, marginTop: 1 }} />
-        <Text style={styles.tipText}>
-          {safAvailable
-            ? "Navigate to your music folder — all MP3, M4A, FLAC, AAC, OGG, WAV files inside will be loaded."
-            : "A folder list from your device will appear. Tap any folder to scan and load all its music files automatically."}
-        </Text>
-      </View>
+      <Text style={styles.hint}>Supports MP3, M4A, AAC, FLAC, OGG, WAV, Opus, WMA</Text>
     </LinearGradient>
   );
 }
@@ -96,14 +109,14 @@ const styles = StyleSheet.create({
     flex: 1,
     alignItems: "center",
     justifyContent: "center",
-    paddingHorizontal: 32,
+    paddingHorizontal: 28,
   },
   iconWrapper: {
-    marginBottom: 32,
+    marginBottom: 24,
   },
   iconGradient: {
-    width: 100,
-    height: 100,
+    width: 96,
+    height: 96,
     borderRadius: 24,
     alignItems: "center",
     justifyContent: "center",
@@ -114,25 +127,70 @@ const styles = StyleSheet.create({
     elevation: 12,
   },
   title: {
-    fontSize: 32,
+    fontSize: 30,
     fontFamily: "Inter_700Bold",
     color: Colors.dark.text,
-    marginBottom: 12,
+    marginBottom: 10,
     textAlign: "center",
   },
   subtitle: {
-    fontSize: 16,
+    fontSize: 15,
     fontFamily: "Inter_400Regular",
     color: Colors.dark.textSecondary,
     textAlign: "center",
-    lineHeight: 24,
-    marginBottom: 36,
+    lineHeight: 22,
+    marginBottom: 20,
+  },
+  stepsCard: {
+    width: "100%",
+    backgroundColor: Colors.dark.surface,
+    borderRadius: 14,
+    padding: 16,
+    marginBottom: 20,
+    borderWidth: 1,
+    borderColor: Colors.dark.border,
+    gap: 10,
+  },
+  stepsTitle: {
+    fontSize: 13,
+    fontFamily: "Inter_600SemiBold",
+    color: Colors.dark.textSecondary,
+    marginBottom: 4,
+    textTransform: "uppercase",
+    letterSpacing: 0.5,
+  },
+  step: {
+    flexDirection: "row",
+    alignItems: "flex-start",
+    gap: 10,
+  },
+  stepBadge: {
+    width: 22,
+    height: 22,
+    borderRadius: 11,
+    backgroundColor: Colors.dark.accent,
+    alignItems: "center",
+    justifyContent: "center",
+    flexShrink: 0,
+    marginTop: 1,
+  },
+  stepNum: {
+    fontSize: 12,
+    fontFamily: "Inter_700Bold",
+    color: "#fff",
+  },
+  stepText: {
+    flex: 1,
+    fontSize: 14,
+    fontFamily: "Inter_400Regular",
+    color: Colors.dark.textSecondary,
+    lineHeight: 20,
   },
   button: {
     width: "100%",
     borderRadius: 16,
     overflow: "hidden",
-    marginBottom: 24,
+    marginBottom: 16,
     shadowColor: Colors.dark.accent,
     shadowOffset: { width: 0, height: 6 },
     shadowOpacity: 0.4,
@@ -151,21 +209,10 @@ const styles = StyleSheet.create({
     fontSize: 17,
     fontFamily: "Inter_600SemiBold",
   },
-  tipBox: {
-    flexDirection: "row",
-    alignItems: "flex-start",
-    backgroundColor: Colors.dark.surface,
-    borderRadius: 12,
-    padding: 14,
-    borderWidth: 1,
-    borderColor: Colors.dark.border,
-    width: "100%",
-  },
-  tipText: {
-    flex: 1,
-    fontSize: 13,
+  hint: {
+    fontSize: 12,
     color: Colors.dark.textTertiary,
     fontFamily: "Inter_400Regular",
-    lineHeight: 19,
+    textAlign: "center",
   },
 });
