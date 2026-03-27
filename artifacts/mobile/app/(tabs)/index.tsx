@@ -1,10 +1,6 @@
 import * as Haptics from "expo-haptics";
-import { LinearGradient } from "expo-linear-gradient";
 import {
-  ChevronLeft,
-  ChevronRight,
   List,
-  ListMusic,
   Pause,
   Play,
   PlusCircle,
@@ -18,7 +14,6 @@ import React, { useState, useCallback, useRef, useEffect } from "react";
 import {
   Alert,
   Animated,
-  FlatList,
   PanResponder,
   Platform,
   StyleSheet,
@@ -33,14 +28,12 @@ import { useMusicContext } from "@/context/MusicContext";
 import { SongArtwork } from "@/components/SongArtwork";
 import { SeekBar } from "@/components/SeekBar";
 import { SetupScreen } from "@/components/SetupScreen";
-import { QueueSheet } from "@/components/QueueSheet";
 
 const SWIPE_THRESHOLD = 60;
 
 export default function PlayerScreen() {
   const insets = useSafeAreaInsets();
   const { width } = useWindowDimensions();
-  const [showQueue, setShowQueue] = useState(false);
   const [isPickingFolder, setIsPickingFolder] = useState(false);
 
   const {
@@ -65,13 +58,12 @@ export default function PlayerScreen() {
     playPrev,
     toggleShuffle,
     seekTo,
-    playSong,
   } = useMusicContext();
 
   const handleClearAll = useCallback(() => {
     Alert.alert(
-      "Clear All Music",
-      "This will remove all loaded songs and return to the setup screen.",
+      "Clear library",
+      "Remove all songs and return to setup?",
       [
         { text: "Cancel", style: "cancel" },
         {
@@ -86,11 +78,11 @@ export default function PlayerScreen() {
     );
   }, [resetSetup]);
 
-  const artSize = Math.min(width - 64, 320);
-  const topInset = Platform.OS === "web" ? 67 : insets.top;
-  const bottomInset = Platform.OS === "web" ? 34 : insets.bottom;
+  const artSize = Math.min(width - 48, 340);
+  const topInset = Platform.OS === "web" ? 48 : insets.top;
+  const bottomInset = Platform.OS === "web" ? 90 : insets.bottom;
 
-  // ── Swipe gesture on artwork ─────────────────────────────────────────────
+  // ── Swipe gesture on artwork ──────────────────────────────────────────
   const slideX = useRef(new Animated.Value(0)).current;
   const slideOpacity = useRef(new Animated.Value(1)).current;
 
@@ -105,12 +97,12 @@ export default function PlayerScreen() {
     Animated.parallel([
       Animated.timing(slideX, {
         toValue: direction === "left" ? -width : width,
-        duration: 220,
+        duration: 200,
         useNativeDriver: true,
       }),
       Animated.timing(slideOpacity, {
         toValue: 0,
-        duration: 180,
+        duration: 160,
         useNativeDriver: true,
       }),
     ]).start(() => {
@@ -120,13 +112,13 @@ export default function PlayerScreen() {
       Animated.parallel([
         Animated.spring(slideX, {
           toValue: 0,
-          speed: 20,
-          bounciness: 4,
+          speed: 22,
+          bounciness: 3,
           useNativeDriver: true,
         }),
         Animated.timing(slideOpacity, {
           toValue: 1,
-          duration: 180,
+          duration: 160,
           useNativeDriver: true,
         }),
       ]).start();
@@ -136,22 +128,19 @@ export default function PlayerScreen() {
   const panResponder = useRef(
     PanResponder.create({
       onMoveShouldSetPanResponder: (_, { dx, dy }) =>
-        Math.abs(dx) > 10 && Math.abs(dx) > Math.abs(dy),
+        Math.abs(dx) > 12 && Math.abs(dx) > Math.abs(dy),
       onPanResponderMove: (_, { dx }) => {
-        slideX.setValue(dx * 0.4);
+        slideX.setValue(dx * 0.35);
       },
       onPanResponderRelease: (_, { dx }) => {
         if (dx > SWIPE_THRESHOLD) {
           Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-          animateSongChange("right", () => playNextRef.current());
+          animateSongChange("right", () => playPrevRef.current());
         } else if (dx < -SWIPE_THRESHOLD) {
           Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-          animateSongChange("left", () => playPrevRef.current());
+          animateSongChange("left", () => playNextRef.current());
         } else {
-          Animated.spring(slideX, {
-            toValue: 0,
-            useNativeDriver: true,
-          }).start();
+          Animated.spring(slideX, { toValue: 0, useNativeDriver: true }).start();
         }
       },
       onPanResponderTerminate: () => {
@@ -160,23 +149,20 @@ export default function PlayerScreen() {
     })
   ).current;
 
-  // ── Folder pick ──────────────────────────────────────────────────────────
+  // ── Folder pick ───────────────────────────────────────────────────────
   const handlePickFolder = useCallback(async () => {
     setIsPickingFolder(true);
     try {
       const success = await pickMusicFolder();
       if (success && !hasCustomImages) {
-        // First-launch only: prompt to also pick an image folder for artwork
         Alert.alert(
-          "Add Song Artwork",
-          "Pick a folder of images to use as album artwork. The app will randomly pick one for each song.",
+          "Add artwork",
+          "Pick a folder of images to use as song artwork?",
           [
-            { text: "Skip for now", style: "cancel" },
+            { text: "Skip", style: "cancel" },
             {
-              text: "Pick Image Folder",
-              onPress: async () => {
-                await pickImageFolder();
-              },
+              text: "Pick folder",
+              onPress: async () => { await pickImageFolder(); },
             },
           ]
         );
@@ -194,7 +180,6 @@ export default function PlayerScreen() {
     else addMoreSongs();
   }, [SAF_AVAILABLE, rescanFolder, addMoreSongs]);
 
-  // ── Playback controls ────────────────────────────────────────────────────
   const handlePlayPause = useCallback(() => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     togglePlayPause();
@@ -227,74 +212,58 @@ export default function PlayerScreen() {
 
   return (
     <View style={[styles.container, { paddingTop: topInset }]}>
-      <LinearGradient
-        colors={[Colors.dark.backgroundTertiary, Colors.dark.background]}
-        style={StyleSheet.absoluteFill}
-      />
 
-      {/* Top bar */}
+      {/* Top utility bar */}
       <View style={styles.topBar}>
-        <View style={styles.topBarLeft}>
-          <TouchableOpacity onPress={handleTopAction} style={styles.iconButton} activeOpacity={0.7}>
-            {SAF_AVAILABLE
-              ? <RefreshCw size={20} color={Colors.dark.textSecondary} />
-              : <PlusCircle size={20} color={Colors.dark.textSecondary} />
-            }
-          </TouchableOpacity>
-          <TouchableOpacity onPress={handleClearAll} style={styles.iconButton} activeOpacity={0.7}>
-            <Trash2 size={18} color={Colors.dark.textTertiary} />
-          </TouchableOpacity>
-        </View>
-        <Text style={styles.topTitle}>Now Playing</Text>
-        <TouchableOpacity onPress={() => setShowQueue(true)} style={styles.iconButton} activeOpacity={0.7}>
-          <List size={22} color={Colors.dark.textSecondary} />
+        <TouchableOpacity onPress={handleClearAll} style={styles.iconBtn} activeOpacity={0.6}>
+          <Trash2 size={18} color={Colors.dark.textTertiary} />
+        </TouchableOpacity>
+        <TouchableOpacity onPress={handleTopAction} style={styles.iconBtn} activeOpacity={0.6}>
+          {SAF_AVAILABLE
+            ? <RefreshCw size={18} color={Colors.dark.textTertiary} />
+            : <PlusCircle size={18} color={Colors.dark.textTertiary} />
+          }
         </TouchableOpacity>
       </View>
 
-      {/* Artwork — swipeable */}
+      {/* Artwork */}
       <View style={styles.artWrapper}>
         <Animated.View
-          style={[
-            styles.artShadow,
-            {
-              width: artSize,
-              height: artSize,
-              borderRadius: 20,
-              transform: [{ translateX: slideX }],
-              opacity: slideOpacity,
-            },
-          ]}
+          style={{
+            width: artSize,
+            height: artSize,
+            transform: [{ translateX: slideX }],
+            opacity: slideOpacity,
+            borderRadius: 4,
+            overflow: "hidden",
+          }}
           {...panResponder.panHandlers}
         >
           <SongArtwork
             imagePool={imagePool}
             songId={currentSong?.id}
             size={artSize}
-            borderRadius={20}
+            borderRadius={4}
           />
-
-          {/* Swipe hint */}
-          <View style={styles.swipeHintRow} pointerEvents="none">
-            <ChevronLeft size={18} color="rgba(255,255,255,0.25)" />
-            <Text style={styles.swipeHint}>swipe to skip</Text>
-            <ChevronRight size={18} color="rgba(255,255,255,0.25)" />
-          </View>
         </Animated.View>
       </View>
 
       {/* Song info */}
-      <View style={styles.infoSection}>
-        {currentSong ? (
-          <>
-            <Text style={styles.songTitle} numberOfLines={1}>{currentSong.title}</Text>
-            <Text style={styles.songArtist} numberOfLines={1}>{currentSong.artist}</Text>
-          </>
-        ) : (
-          <>
-            <Text style={styles.songTitle}>No song selected</Text>
-            <Text style={styles.songArtist}>{songs.length} songs loaded — tap one in the queue</Text>
-          </>
-        )}
+      <View style={styles.infoRow}>
+        <View style={styles.infoText}>
+          <Text style={styles.songTitle} numberOfLines={1}>
+            {currentSong?.title ?? (songs.length > 0 ? "—" : "No songs")}
+          </Text>
+          <Text style={styles.songArtist} numberOfLines={1}>
+            {currentSong?.artist ?? (songs.length > 0 ? `${songs.length} songs` : "Add songs to start")}
+          </Text>
+        </View>
+        <TouchableOpacity onPress={handleShuffle} style={styles.shuffleBtn} activeOpacity={0.7}>
+          <Shuffle
+            size={20}
+            color={shuffleEnabled ? Colors.dark.accent : Colors.dark.textTertiary}
+          />
+        </TouchableOpacity>
       </View>
 
       {/* Seek bar */}
@@ -306,79 +275,23 @@ export default function PlayerScreen() {
         />
       </View>
 
-      {/* Playback controls */}
-      <View style={styles.controls}>
-        <TouchableOpacity onPress={handleShuffle} style={styles.controlIconBtn} activeOpacity={0.7}>
-          <Shuffle size={24} color={shuffleEnabled ? Colors.dark.accent : Colors.dark.textTertiary} />
-          {shuffleEnabled && <View style={styles.activeDot} />}
+      {/* Controls */}
+      <View style={[styles.controls, { paddingBottom: bottomInset + 80 }]}>
+        <TouchableOpacity onPress={handlePrev} style={styles.controlBtn} activeOpacity={0.7}>
+          <SkipBack size={28} color={Colors.dark.text} fill={Colors.dark.text} />
         </TouchableOpacity>
 
-        <TouchableOpacity onPress={handlePrev} style={styles.controlIconBtn} activeOpacity={0.7}>
-          <SkipBack size={32} color={Colors.dark.text} />
+        <TouchableOpacity onPress={handlePlayPause} activeOpacity={0.85} style={styles.playBtn}>
+          {status.playing
+            ? <Pause size={32} color={Colors.dark.background} fill={Colors.dark.background} />
+            : <Play size={32} color={Colors.dark.background} fill={Colors.dark.background} style={{ marginLeft: 3 }} />
+          }
         </TouchableOpacity>
 
-        <TouchableOpacity onPress={handlePlayPause} activeOpacity={0.8} style={styles.playBtn}>
-          <LinearGradient
-            colors={[Colors.dark.accent, Colors.dark.accentDark]}
-            style={styles.playBtnGradient}
-          >
-            {status.playing
-              ? <Pause size={34} color="#fff" />
-              : <Play size={34} color="#fff" style={{ marginLeft: 3 }} />
-            }
-          </LinearGradient>
-        </TouchableOpacity>
-
-        <TouchableOpacity onPress={handleNext} style={styles.controlIconBtn} activeOpacity={0.7}>
-          <SkipForward size={32} color={Colors.dark.text} />
-        </TouchableOpacity>
-
-        <TouchableOpacity onPress={() => setShowQueue(true)} style={styles.controlIconBtn} activeOpacity={0.7}>
-          <ListMusic size={26} color={Colors.dark.textTertiary} />
+        <TouchableOpacity onPress={handleNext} style={styles.controlBtn} activeOpacity={0.7}>
+          <SkipForward size={28} color={Colors.dark.text} fill={Colors.dark.text} />
         </TouchableOpacity>
       </View>
-
-      {/* Queue preview */}
-      <View style={[styles.queuePreview, { paddingBottom: bottomInset + 16 }]}>
-        <Text style={styles.queueLabel}>Up Next</Text>
-        <FlatList
-          data={queue.slice(currentIndex + 1, currentIndex + 4)}
-          keyExtractor={(item) => item.id}
-          showsVerticalScrollIndicator={false}
-          scrollEnabled={false}
-          renderItem={({ item }) => (
-            <TouchableOpacity
-              style={styles.miniSongRow}
-              onPress={() => {
-                const idx = queue.findIndex((s) => s.id === item.id);
-                playSong(item, queue, idx);
-              }}
-              activeOpacity={0.7}
-            >
-              <SongArtwork imagePool={imagePool} songId={item.id} size={36} borderRadius={6} />
-              <View style={styles.miniSongInfo}>
-                <Text style={styles.miniSongTitle} numberOfLines={1}>{item.title}</Text>
-                <Text style={styles.miniSongArtist} numberOfLines={1}>{item.artist}</Text>
-              </View>
-            </TouchableOpacity>
-          )}
-          ListEmptyComponent={() => (
-            <Text style={styles.emptyQueue}>No more songs in queue</Text>
-          )}
-        />
-      </View>
-
-      <QueueSheet
-        visible={showQueue}
-        onClose={() => setShowQueue(false)}
-        queue={queue}
-        currentIndex={currentIndex}
-        imagePool={imagePool}
-        onSelectSong={(song, index) => {
-          playSong(song, queue, index);
-          Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-        }}
-      />
     </View>
   );
 }
@@ -387,118 +300,73 @@ const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: Colors.dark.background },
   topBar: {
     flexDirection: "row",
-    alignItems: "center",
     justifyContent: "space-between",
     paddingHorizontal: 20,
-    paddingVertical: 12,
+    paddingTop: 4,
+    paddingBottom: 8,
   },
-  topBarLeft: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 2,
-  },
-  topTitle: {
-    color: Colors.dark.textSecondary,
-    fontSize: 14,
-    fontFamily: "Inter_500Medium",
-    letterSpacing: 0.5,
-    textTransform: "uppercase",
-  },
-  iconButton: { width: 36, height: 36, alignItems: "center", justifyContent: "center" },
-  artWrapper: {
-    alignItems: "center",
-    paddingHorizontal: 32,
-    paddingVertical: 12,
-  },
-  artShadow: {
-    shadowColor: Colors.dark.accent,
-    shadowOffset: { width: 0, height: 16 },
-    shadowOpacity: 0.35,
-    shadowRadius: 28,
-    elevation: 16,
-    overflow: "hidden",
-  },
-  swipeHintRow: {
-    position: "absolute",
-    bottom: 10,
-    left: 0,
-    right: 0,
-    flexDirection: "row",
+  iconBtn: {
+    width: 36,
+    height: 36,
     alignItems: "center",
     justifyContent: "center",
-    gap: 4,
   },
-  swipeHint: {
-    fontSize: 11,
-    color: "rgba(255,255,255,0.25)",
+  artWrapper: {
+    alignItems: "center",
+    paddingHorizontal: 24,
+    paddingVertical: 16,
+    flex: 1,
+    justifyContent: "center",
+  },
+  infoRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    paddingHorizontal: 24,
+    marginBottom: 4,
+    gap: 12,
+  },
+  infoText: { flex: 1 },
+  songTitle: {
+    color: Colors.dark.text,
+    fontSize: 22,
+    fontFamily: "Inter_700Bold",
+    letterSpacing: -0.3,
+  },
+  songArtist: {
+    color: Colors.dark.textSecondary,
+    fontSize: 14,
     fontFamily: "Inter_400Regular",
+    marginTop: 4,
   },
-  infoSection: { paddingHorizontal: 32, marginTop: 20, marginBottom: 8, gap: 6 },
-  songTitle: { color: Colors.dark.text, fontSize: 22, fontFamily: "Inter_700Bold" },
-  songArtist: { color: Colors.dark.textSecondary, fontSize: 15, fontFamily: "Inter_400Regular" },
-  seekSection: { paddingHorizontal: 28, marginVertical: 8 },
+  shuffleBtn: {
+    width: 40,
+    height: 40,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  seekSection: {
+    paddingHorizontal: 16,
+    marginBottom: 8,
+  },
   controls: {
     flexDirection: "row",
     alignItems: "center",
-    justifyContent: "space-between",
-    paddingHorizontal: 28,
-    marginTop: 12,
-    marginBottom: 16,
+    justifyContent: "center",
+    paddingHorizontal: 24,
+    gap: 40,
   },
-  controlIconBtn: { width: 44, height: 44, alignItems: "center", justifyContent: "center" },
-  activeDot: {
-    width: 4,
-    height: 4,
-    borderRadius: 2,
-    backgroundColor: Colors.dark.accent,
-    position: "absolute",
-    bottom: 6,
-  },
-  playBtn: {
-    shadowColor: Colors.dark.accent,
-    shadowOffset: { width: 0, height: 8 },
-    shadowOpacity: 0.5,
-    shadowRadius: 16,
-    elevation: 10,
-  },
-  playBtnGradient: {
-    width: 72,
-    height: 72,
-    borderRadius: 36,
+  controlBtn: {
+    width: 52,
+    height: 52,
     alignItems: "center",
     justifyContent: "center",
   },
-  queuePreview: {
-    flex: 1,
-    paddingHorizontal: 24,
-    borderTopWidth: 1,
-    borderTopColor: Colors.dark.border,
-    paddingTop: 16,
-  },
-  queueLabel: {
-    color: Colors.dark.textTertiary,
-    fontSize: 12,
-    fontFamily: "Inter_500Medium",
-    letterSpacing: 0.8,
-    textTransform: "uppercase",
-    marginBottom: 10,
-  },
-  miniSongRow: {
-    flexDirection: "row",
+  playBtn: {
+    width: 64,
+    height: 64,
+    borderRadius: 32,
+    backgroundColor: Colors.dark.text,
     alignItems: "center",
-    gap: 12,
-    paddingVertical: 8,
-    borderRadius: 10,
-    paddingHorizontal: 4,
-  },
-  miniSongInfo: { flex: 1 },
-  miniSongTitle: { color: Colors.dark.textSecondary, fontSize: 14, fontFamily: "Inter_500Medium" },
-  miniSongArtist: { color: Colors.dark.textTertiary, fontSize: 12, fontFamily: "Inter_400Regular" },
-  emptyQueue: {
-    color: Colors.dark.textTertiary,
-    fontSize: 13,
-    fontFamily: "Inter_400Regular",
-    textAlign: "center",
-    marginTop: 8,
+    justifyContent: "center",
   },
 });

@@ -1,5 +1,5 @@
 import { Tabs } from "expo-router";
-import { ImageIcon, Music2 } from "lucide-react-native";
+import { ImageIcon, Library, Music2 } from "lucide-react-native";
 import React from "react";
 import { Platform, StyleSheet, View } from "react-native";
 import { BlurView } from "expo-blur";
@@ -12,21 +12,23 @@ export default function TabLayout() {
     <Tabs
       screenOptions={{
         headerShown: false,
-        tabBarActiveTintColor: Colors.dark.accent,
+        tabBarShowLabel: false,
+        tabBarActiveTintColor: Colors.dark.text,
         tabBarInactiveTintColor: Colors.dark.textTertiary,
         tabBarStyle: {
           position: "absolute",
-          backgroundColor: isIOS ? "transparent" : Colors.dark.backgroundSecondary,
-          borderTopWidth: 1,
+          backgroundColor: isIOS ? "transparent" : Colors.dark.background,
+          borderTopWidth: StyleSheet.hairlineWidth,
           borderTopColor: Colors.dark.border,
           elevation: 0,
+          height: 52,
         },
         tabBarBackground: () =>
           isIOS ? (
-            <BlurView intensity={80} tint="dark" style={StyleSheet.absoluteFill} />
+            <BlurView intensity={90} tint="dark" style={StyleSheet.absoluteFill} />
           ) : (
             <View
-              style={[StyleSheet.absoluteFill, { backgroundColor: Colors.dark.backgroundSecondary }]}
+              style={[StyleSheet.absoluteFill, { backgroundColor: Colors.dark.background }]}
             />
           ),
       }}
@@ -34,14 +36,18 @@ export default function TabLayout() {
       <Tabs.Screen
         name="index"
         options={{
-          title: "Player",
-          tabBarIcon: ({ color }) => <Music2 size={24} color={color} />,
+          tabBarIcon: ({ color }) => <Music2 size={22} color={color} />,
+        }}
+      />
+      <Tabs.Screen
+        name="library"
+        options={{
+          tabBarIcon: ({ color }) => <Library size={22} color={color} />,
         }}
       />
       <Tabs.Screen
         name="images"
         options={{
-          title: "Images",
           tabBarIcon: ({ color }) => <ImageIcon size={22} color={color} />,
         }}
       />

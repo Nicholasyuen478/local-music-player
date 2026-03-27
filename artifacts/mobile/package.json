@@ -57,6 +57,7 @@
   },
   "dependencies": {
     "@nkzw/create-context-hook": "^1.1.0",
+    "@react-native-community/slider": "^5.0.1",
     "expo-asset": "^12.0.12",
     "expo-audio": "^1.1.1",
     "expo-document-picker": "^14.0.8",
