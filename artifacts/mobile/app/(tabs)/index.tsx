@@ -52,8 +52,13 @@ export default function PlayerScreen() {
 
   const handlePickFolder = useCallback(async () => {
     setIsPickingFolder(true);
-    await pickMusicFolder();
-    setIsPickingFolder(false);
+    try {
+      await pickMusicFolder();
+    } catch (e) {
+      console.error("handlePickFolder error", e);
+    } finally {
+      setIsPickingFolder(false);
+    }
     return true;
   }, [pickMusicFolder]);
 

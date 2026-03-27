@@ -58,27 +58,28 @@ async function scanMusicFolderSAF(folderUri: string): Promise<Song[]> {
   }
 }
 
-// Uses DocumentPicker so user can navigate to their exact folder and pick files
+const AUDIO_EXTENSIONS = [".mp3", ".m4a", ".aac", ".ogg", ".flac", ".wav", ".opus", ".wma"];
+
+// Uses DocumentPicker so user can navigate to their exact folder and pick files.
+// We use type "*/*" because many Android versions/file managers silently reject
+// specific audio MIME types — we filter by extension ourselves after selection.
 async function pickFilesViaDocumentPicker(): Promise<Song[]> {
   const result = await DocumentPicker.getDocumentAsync({
-    type: [
-      "audio/mpeg",
-      "audio/mp4",
-      "audio/aac",
-      "audio/ogg",
-      "audio/flac",
-      "audio/wav",
-      "audio/x-wav",
-      "audio/x-flac",
-      "audio/*",
-    ],
+    type: "*/*",
     multiple: true,
     copyToCacheDirectory: false,
   });
 
-  if (result.canceled || result.assets.length === 0) return [];
+  if (result.canceled || !result.assets || result.assets.length === 0) return [];
 
-  return result.assets.map((a) => {
+  const audioAssets = result.assets.filter((a) => {
+    const name = (a.name || a.uri).toLowerCase();
+    return AUDIO_EXTENSIONS.some((ext) => name.endsWith(ext));
+  });
+
+  if (audioAssets.length === 0) return [];
+
+  return audioAssets.map((a) => {
     const filename = a.name || a.uri.split("/").pop() || "Unknown";
     return parseSongMeta(filename, a.uri);
   });
@@ -201,21 +202,27 @@ const [MusicContextProvider, useMusicContext] = createContextHook(() => {
 
   // Add more songs via the file picker (Expo Go friendly)
   const addMoreSongs = useCallback(async () => {
+    let found: Song[] = [];
     try {
-      const found = await pickFilesViaDocumentPicker();
-      if (found.length === 0) return;
-      const merged = [...songs];
-      for (const s of found) {
-        if (!merged.find((x) => x.uri === s.uri)) merged.push(s);
-      }
-      setSongs(merged);
-      setQueue(merged);
+      found = await pickFilesViaDocumentPicker();
+    } catch (e) {
+      console.error("addMoreSongs picker error", e);
+      return;
+    }
+    if (found.length === 0) return;
+    const merged = [...songs];
+    for (const s of found) {
+      if (!merged.find((x) => x.uri === s.uri)) merged.push(s);
+    }
+    setSongs(merged);
+    setQueue(merged);
+    try {
       await Promise.all([
         AsyncStorage.setItem(STORAGE_KEYS.SONGS, JSON.stringify(merged)),
         AsyncStorage.setItem(STORAGE_KEYS.QUEUE, JSON.stringify(merged)),
       ]);
     } catch (e) {
-      console.error("addMoreSongs error", e);
+      console.error("addMoreSongs save error", e);
     }
   }, [songs]);
 
