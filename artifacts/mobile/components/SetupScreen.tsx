@@ -41,11 +41,11 @@ export function SetupScreen({ onPickFolder, isLoading, safAvailable }: Props) {
 
       {safAvailable ? (
         <Text style={styles.subtitle}>
-          Pick a specific folder on your device.{"\n"}Only files in that folder will be loaded.
+          Pick a folder on your device and all music inside will be loaded automatically.
         </Text>
       ) : (
         <Text style={styles.subtitle}>
-          Browse to your music folder and select the files you want to play.{"\n"}You can add more songs later.
+          Choose a folder from your device — all music inside will load automatically.
         </Text>
       )}
 
@@ -84,7 +84,7 @@ export function SetupScreen({ onPickFolder, isLoading, safAvailable }: Props) {
         <Text style={styles.tipText}>
           {safAvailable
             ? "Navigate to your music folder — all MP3, M4A, FLAC, AAC, OGG, WAV files inside will be loaded."
-            : "In the file browser, navigate to your music folder then tap the files you want (or select all). Supports MP3, M4A, FLAC, AAC, OGG, WAV."}
+            : "A folder list from your device will appear. Tap any folder to scan and load all its music files automatically."}
         </Text>
       </View>
     </LinearGradient>

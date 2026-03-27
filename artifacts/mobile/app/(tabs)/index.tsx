@@ -3,7 +3,6 @@ import * as Haptics from "expo-haptics";
 import { LinearGradient } from "expo-linear-gradient";
 import React, { useState, useCallback } from "react";
 import {
-  Animated,
   FlatList,
   Platform,
   StyleSheet,
@@ -19,6 +18,7 @@ import { SongArtwork } from "@/components/SongArtwork";
 import { SeekBar } from "@/components/SeekBar";
 import { SetupScreen } from "@/components/SetupScreen";
 import { QueueSheet } from "@/components/QueueSheet";
+import { AlbumPickerModal } from "@/components/AlbumPickerModal";
 
 export default function PlayerScreen() {
   const insets = useSafeAreaInsets();
@@ -37,15 +37,22 @@ export default function PlayerScreen() {
     isLoading,
     isSetupDone,
     SAF_AVAILABLE,
+    albums,
+    showAlbumPicker,
+    albumPermissionDenied,
+    isScanningAlbum,
     pickMusicFolder,
-    addMoreSongs,
+    selectAlbum,
+    dismissAlbumPicker,
+    openAppSettings,
+    rescanFolder,
+    changeFolder,
     togglePlayPause,
     playNext,
     playPrev,
     toggleShuffle,
     seekTo,
     playSong,
-    rescanFolder,
   } = useMusicContext();
 
   const artSize = Math.min(width - 64, 320);
@@ -87,11 +94,23 @@ export default function PlayerScreen() {
 
   if (!isSetupDone) {
     return (
-      <SetupScreen
-        onPickFolder={handlePickFolder}
-        isLoading={isPickingFolder || isLoading}
-        safAvailable={SAF_AVAILABLE}
-      />
+      <>
+        <SetupScreen
+          onPickFolder={handlePickFolder}
+          isLoading={isPickingFolder || isLoading}
+          safAvailable={SAF_AVAILABLE}
+        />
+        {/* Album picker modal opens on top of setup screen in Expo Go */}
+        <AlbumPickerModal
+          visible={showAlbumPicker}
+          albums={albums}
+          permissionDenied={albumPermissionDenied}
+          isScanning={isScanningAlbum}
+          onSelectAlbum={selectAlbum}
+          onDismiss={dismissAlbumPicker}
+          onOpenSettings={openAppSettings}
+        />
+      </>
     );
   }
 
@@ -104,12 +123,12 @@ export default function PlayerScreen() {
 
       <View style={styles.topBar}>
         <TouchableOpacity
-          onPress={SAF_AVAILABLE ? rescanFolder : addMoreSongs}
+          onPress={SAF_AVAILABLE ? rescanFolder : changeFolder}
           style={styles.iconButton}
           activeOpacity={0.7}
         >
           <Feather
-            name={SAF_AVAILABLE ? "refresh-cw" : "plus-circle"}
+            name={SAF_AVAILABLE ? "refresh-cw" : "folder"}
             size={20}
             color={Colors.dark.textSecondary}
           />
@@ -229,6 +248,17 @@ export default function PlayerScreen() {
           playSong(song, queue, index);
           Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
         }}
+      />
+
+      {/* Album picker — also accessible from the player via the folder button */}
+      <AlbumPickerModal
+        visible={showAlbumPicker}
+        albums={albums}
+        permissionDenied={albumPermissionDenied}
+        isScanning={isScanningAlbum}
+        onSelectAlbum={selectAlbum}
+        onDismiss={dismissAlbumPicker}
+        onOpenSettings={openAppSettings}
       />
     </View>
   );
