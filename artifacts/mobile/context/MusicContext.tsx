@@ -164,13 +164,17 @@ const [MusicContextProvider, useMusicContext] = createContextHook(() => {
 
       if (cachedSongs) {
         const parsed: Song[] = JSON.parse(cachedSongs);
+        const q: Song[] = savedQueue ? JSON.parse(savedQueue) : parsed;
+        const idx = savedIndex ? parseInt(savedIndex, 10) : 0;
         setSongs(parsed);
-        if (savedQueue) {
-          setQueue(JSON.parse(savedQueue));
-        } else {
-          setQueue(parsed);
+        setQueue(q);
+        setCurrentIndex(idx);
+        // Pre-load the current song into the player so pressing play works immediately
+        const song = q[idx];
+        if (song?.uri) {
+          player.replace({ uri: song.uri });
+          // Don't auto-play — let the user initiate
         }
-        if (savedIndex) setCurrentIndex(parseInt(savedIndex, 10));
       }
 
       setIsSetupDone(!!folderUri && !!cachedSongs);
@@ -251,9 +255,18 @@ const [MusicContextProvider, useMusicContext] = createContextHook(() => {
     try {
       if (SAF_AVAILABLE && musicFolderUri.startsWith("content://")) {
         const found = await scanMusicFolderSAF(musicFolderUri);
-        setSongs(found);
-        setQueue(found);
-        await AsyncStorage.setItem(STORAGE_KEYS.SONGS, JSON.stringify(found));
+        // Merge: keep existing songs, add any new ones found in the folder
+        setSongs((prev) => {
+          const merged = [...prev];
+          for (const s of found) {
+            if (!merged.find((x) => x.uri === s.uri)) merged.push(s);
+          }
+          const next = merged;
+          AsyncStorage.setItem(STORAGE_KEYS.SONGS, JSON.stringify(next));
+          AsyncStorage.setItem(STORAGE_KEYS.QUEUE, JSON.stringify(next));
+          setQueue(next);
+          return next;
+        });
       } else {
         await addMoreSongs();
       }
