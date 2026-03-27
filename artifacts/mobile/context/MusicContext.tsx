@@ -1,10 +1,10 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import createContextHook from "@nkzw/create-context-hook";
 import { useAudioPlayer, useAudioPlayerStatus, setAudioModeAsync } from "expo-audio";
+import * as DocumentPicker from "expo-document-picker";
 import * as FileSystem from "expo-file-system";
-import * as MediaLibrary from "expo-media-library";
-import React, { useCallback, useEffect, useRef, useState } from "react";
-import { Alert, Platform } from "react-native";
+import React, { useCallback, useEffect, useState } from "react";
+import { Platform } from "react-native";
 
 export type Song = {
   id: string;
@@ -25,8 +25,17 @@ const STORAGE_KEYS = {
   SHUFFLE: "shuffle_enabled",
 };
 
+// StorageAccessFramework is only available in real (non-Expo Go) builds
 const SAF = FileSystem.StorageAccessFramework;
-const SAF_AVAILABLE = !!SAF && typeof SAF.requestDirectoryPermissionsAsync === "function";
+const SAF_AVAILABLE = !!SAF && typeof SAF?.requestDirectoryPermissionsAsync === "function";
+
+function parseSongMeta(filename: string, uri: string): Song {
+  const nameWithoutExt = filename.replace(/\.[^/.]+$/, "");
+  const parts = nameWithoutExt.split(" - ");
+  const artist = parts.length > 1 ? parts[0].trim() : "Unknown Artist";
+  const title = parts.length > 1 ? parts.slice(1).join(" - ").trim() : nameWithoutExt;
+  return { id: uri, title, artist, uri, filename };
+}
 
 async function scanMusicFolderSAF(folderUri: string): Promise<Song[]> {
   try {
@@ -34,13 +43,12 @@ async function scanMusicFolderSAF(folderUri: string): Promise<Song[]> {
     const songs: Song[] = [];
     for (const fileUri of files) {
       const lower = fileUri.toLowerCase();
-      if (lower.endsWith(".mp3") || lower.endsWith(".m4a") || lower.endsWith(".aac") || lower.endsWith(".ogg") || lower.endsWith(".flac") || lower.endsWith(".wav")) {
-        const filename = decodeURIComponent(fileUri.split("%2F").pop() || fileUri.split("/").pop() || fileUri);
-        const nameWithoutExt = filename.replace(/\.[^/.]+$/, "");
-        const parts = nameWithoutExt.split(" - ");
-        const artist = parts.length > 1 ? parts[0].trim() : "Unknown Artist";
-        const title = parts.length > 1 ? parts.slice(1).join(" - ").trim() : nameWithoutExt;
-        songs.push({ id: fileUri, title, artist, uri: fileUri, filename });
+      if (lower.endsWith(".mp3") || lower.endsWith(".m4a") || lower.endsWith(".aac") ||
+          lower.endsWith(".ogg") || lower.endsWith(".flac") || lower.endsWith(".wav")) {
+        const filename = decodeURIComponent(
+          fileUri.split("%2F").pop() || fileUri.split("/").pop() || fileUri
+        );
+        songs.push(parseSongMeta(filename, fileUri));
       }
     }
     return songs;
@@ -50,29 +58,29 @@ async function scanMusicFolderSAF(folderUri: string): Promise<Song[]> {
   }
 }
 
-async function scanViaMediaLibrary(): Promise<Song[]> {
-  const { status } = await MediaLibrary.requestPermissionsAsync();
-  if (status !== "granted") return [];
-  const all: MediaLibrary.Asset[] = [];
-  let after: string | undefined;
-  let hasMore = true;
-  while (hasMore) {
-    const page = await MediaLibrary.getAssetsAsync({
-      mediaType: "audio",
-      first: 500,
-      after,
-    });
-    all.push(...page.assets);
-    hasMore = page.hasNextPage;
-    after = page.endCursor;
-    if (all.length >= 2000) break;
-  }
-  return all.map((a) => {
-    const nameWithoutExt = a.filename.replace(/\.[^/.]+$/, "");
-    const parts = nameWithoutExt.split(" - ");
-    const artist = parts.length > 1 ? parts[0].trim() : "Unknown Artist";
-    const title = parts.length > 1 ? parts.slice(1).join(" - ").trim() : nameWithoutExt;
-    return { id: a.id, title, artist, uri: a.uri, filename: a.filename, duration: a.duration };
+// Uses DocumentPicker so user can navigate to their exact folder and pick files
+async function pickFilesViaDocumentPicker(): Promise<Song[]> {
+  const result = await DocumentPicker.getDocumentAsync({
+    type: [
+      "audio/mpeg",
+      "audio/mp4",
+      "audio/aac",
+      "audio/ogg",
+      "audio/flac",
+      "audio/wav",
+      "audio/x-wav",
+      "audio/x-flac",
+      "audio/*",
+    ],
+    multiple: true,
+    copyToCacheDirectory: false,
+  });
+
+  if (result.canceled || result.assets.length === 0) return [];
+
+  return result.assets.map((a) => {
+    const filename = a.name || a.uri.split("/").pop() || "Unknown";
+    return parseSongMeta(filename, a.uri);
   });
 }
 
@@ -116,15 +124,16 @@ const [MusicContextProvider, useMusicContext] = createContextHook(() => {
   async function loadPersistedData() {
     setIsLoading(true);
     try {
-      const [folderUri, cachedSongs, pool, imgFolder, savedQueue, savedIndex, savedShuffle] = await Promise.all([
-        AsyncStorage.getItem(STORAGE_KEYS.MUSIC_FOLDER),
-        AsyncStorage.getItem(STORAGE_KEYS.SONGS),
-        AsyncStorage.getItem(STORAGE_KEYS.IMAGE_POOL),
-        AsyncStorage.getItem(STORAGE_KEYS.IMAGE_FOLDER),
-        AsyncStorage.getItem(STORAGE_KEYS.QUEUE),
-        AsyncStorage.getItem(STORAGE_KEYS.CURRENT_INDEX),
-        AsyncStorage.getItem(STORAGE_KEYS.SHUFFLE),
-      ]);
+      const [folderUri, cachedSongs, pool, imgFolder, savedQueue, savedIndex, savedShuffle] =
+        await Promise.all([
+          AsyncStorage.getItem(STORAGE_KEYS.MUSIC_FOLDER),
+          AsyncStorage.getItem(STORAGE_KEYS.SONGS),
+          AsyncStorage.getItem(STORAGE_KEYS.IMAGE_POOL),
+          AsyncStorage.getItem(STORAGE_KEYS.IMAGE_FOLDER),
+          AsyncStorage.getItem(STORAGE_KEYS.QUEUE),
+          AsyncStorage.getItem(STORAGE_KEYS.CURRENT_INDEX),
+          AsyncStorage.getItem(STORAGE_KEYS.SHUFFLE),
+        ]);
 
       if (folderUri) setMusicFolderUri(folderUri);
       if (pool) setImagePool(JSON.parse(pool));
@@ -151,90 +160,108 @@ const [MusicContextProvider, useMusicContext] = createContextHook(() => {
     }
   }
 
-  const pickMusicFolder = useCallback(async () => {
+  // Pick music: SAF folder picker in real APK, DocumentPicker in Expo Go
+  const pickMusicFolder = useCallback(async (): Promise<boolean> => {
     try {
-      if (Platform.OS === "android" && SAF_AVAILABLE) {
+      if (SAF_AVAILABLE) {
+        // Real APK: let user choose a specific folder via SAF
         const permissions = await SAF.requestDirectoryPermissionsAsync();
-        if (!permissions.granted) {
-          const found = await scanViaMediaLibrary();
-          if (found.length === 0) return false;
-          setSongs(found);
-          setQueue(found);
-          await AsyncStorage.setItem(STORAGE_KEYS.SONGS, JSON.stringify(found));
-          await AsyncStorage.setItem(STORAGE_KEYS.MUSIC_FOLDER, "media-library");
-          setMusicFolderUri("media-library");
-          setIsSetupDone(true);
-          return true;
-        }
+        if (!permissions.granted) return false;
         const folderUri = permissions.directoryUri;
-        setMusicFolderUri(folderUri);
-        await AsyncStorage.setItem(STORAGE_KEYS.MUSIC_FOLDER, folderUri);
         const found = await scanMusicFolderSAF(folderUri);
-        const finalSongs = found.length > 0 ? found : await scanViaMediaLibrary();
-        setSongs(finalSongs);
-        setQueue(finalSongs);
-        await AsyncStorage.setItem(STORAGE_KEYS.SONGS, JSON.stringify(finalSongs));
+        if (found.length === 0) return false;
+        setMusicFolderUri(folderUri);
+        setSongs(found);
+        setQueue(found);
+        await Promise.all([
+          AsyncStorage.setItem(STORAGE_KEYS.MUSIC_FOLDER, folderUri),
+          AsyncStorage.setItem(STORAGE_KEYS.SONGS, JSON.stringify(found)),
+        ]);
         setIsSetupDone(true);
         return true;
       } else {
-        const found = await scanViaMediaLibrary();
+        // Expo Go: use file picker — user navigates to their music folder & selects files
+        const found = await pickFilesViaDocumentPicker();
         if (found.length === 0) return false;
         setSongs(found);
         setQueue(found);
-        await AsyncStorage.setItem(STORAGE_KEYS.SONGS, JSON.stringify(found));
-        await AsyncStorage.setItem(STORAGE_KEYS.MUSIC_FOLDER, "media-library");
-        setMusicFolderUri("media-library");
+        await Promise.all([
+          AsyncStorage.setItem(STORAGE_KEYS.MUSIC_FOLDER, "doc-picker"),
+          AsyncStorage.setItem(STORAGE_KEYS.SONGS, JSON.stringify(found)),
+        ]);
+        setMusicFolderUri("doc-picker");
         setIsSetupDone(true);
         return true;
       }
     } catch (e) {
       console.error("pickMusicFolder error", e);
-      const found = await scanViaMediaLibrary();
-      if (found.length === 0) return false;
-      setSongs(found);
-      setQueue(found);
-      await AsyncStorage.setItem(STORAGE_KEYS.SONGS, JSON.stringify(found));
-      await AsyncStorage.setItem(STORAGE_KEYS.MUSIC_FOLDER, "media-library");
-      setMusicFolderUri("media-library");
-      setIsSetupDone(true);
-      return true;
+      return false;
     }
   }, []);
+
+  // Add more songs via the file picker (Expo Go friendly)
+  const addMoreSongs = useCallback(async () => {
+    try {
+      const found = await pickFilesViaDocumentPicker();
+      if (found.length === 0) return;
+      const merged = [...songs];
+      for (const s of found) {
+        if (!merged.find((x) => x.uri === s.uri)) merged.push(s);
+      }
+      setSongs(merged);
+      setQueue(merged);
+      await Promise.all([
+        AsyncStorage.setItem(STORAGE_KEYS.SONGS, JSON.stringify(merged)),
+        AsyncStorage.setItem(STORAGE_KEYS.QUEUE, JSON.stringify(merged)),
+      ]);
+    } catch (e) {
+      console.error("addMoreSongs error", e);
+    }
+  }, [songs]);
 
   const rescanFolder = useCallback(async () => {
     if (!musicFolderUri) return;
     setIsLoading(true);
     try {
-      let found: Song[] = [];
       if (SAF_AVAILABLE && musicFolderUri.startsWith("content://")) {
-        found = await scanMusicFolderSAF(musicFolderUri);
+        const found = await scanMusicFolderSAF(musicFolderUri);
+        setSongs(found);
+        setQueue(found);
+        await AsyncStorage.setItem(STORAGE_KEYS.SONGS, JSON.stringify(found));
       } else {
-        found = await scanViaMediaLibrary();
+        // In Expo Go, re-pick files
+        const found = await pickFilesViaDocumentPicker();
+        if (found.length > 0) {
+          setSongs(found);
+          setQueue(found);
+          await AsyncStorage.setItem(STORAGE_KEYS.SONGS, JSON.stringify(found));
+        }
       }
-      setSongs(found);
-      setQueue(found);
-      await AsyncStorage.setItem(STORAGE_KEYS.SONGS, JSON.stringify(found));
     } finally {
       setIsLoading(false);
     }
   }, [musicFolderUri]);
 
-  const playSong = useCallback(async (song: Song, newQueue?: Song[], indexInQueue?: number) => {
-    try {
-      const q = newQueue ?? queue;
-      const idx = indexInQueue ?? q.findIndex((s) => s.id === song.id);
-      setCurrentIndex(idx >= 0 ? idx : 0);
-      if (newQueue) setQueue(newQueue);
-      player.replace({ uri: song.uri });
-      player.play();
-      await Promise.all([
-        AsyncStorage.setItem(STORAGE_KEYS.QUEUE, JSON.stringify(q)),
-        AsyncStorage.setItem(STORAGE_KEYS.CURRENT_INDEX, String(idx >= 0 ? idx : 0)),
-      ]);
-    } catch (e) {
-      console.error("play error", e);
-    }
-  }, [player, queue]);
+  const playSong = useCallback(
+    async (song: Song, newQueue?: Song[], indexInQueue?: number) => {
+      try {
+        const q = newQueue ?? queue;
+        const idx = indexInQueue ?? q.findIndex((s) => s.id === song.id);
+        const resolvedIdx = idx >= 0 ? idx : 0;
+        setCurrentIndex(resolvedIdx);
+        if (newQueue) setQueue(newQueue);
+        player.replace({ uri: song.uri });
+        player.play();
+        await Promise.all([
+          AsyncStorage.setItem(STORAGE_KEYS.QUEUE, JSON.stringify(q)),
+          AsyncStorage.setItem(STORAGE_KEYS.CURRENT_INDEX, String(resolvedIdx)),
+        ]);
+      } catch (e) {
+        console.error("play error", e);
+      }
+    },
+    [player, queue]
+  );
 
   const togglePlayPause = useCallback(() => {
     if (status.playing) {
@@ -288,18 +315,25 @@ const [MusicContextProvider, useMusicContext] = createContextHook(() => {
     }
   }, [status.didJustFinish]);
 
-  const addImagesToPool = useCallback(async (uris: string[]) => {
-    const next = [...new Set([...imagePool, ...uris])];
-    setImagePool(next);
-    await AsyncStorage.setItem(STORAGE_KEYS.IMAGE_POOL, JSON.stringify(next));
-  }, [imagePool]);
+  const addImagesToPool = useCallback(
+    async (uris: string[]) => {
+      const next = [...new Set([...imagePool, ...uris])];
+      setImagePool(next);
+      await AsyncStorage.setItem(STORAGE_KEYS.IMAGE_POOL, JSON.stringify(next));
+    },
+    [imagePool]
+  );
 
-  const removeImageFromPool = useCallback(async (uri: string) => {
-    const next = imagePool.filter((u) => u !== uri);
-    setImagePool(next);
-    await AsyncStorage.setItem(STORAGE_KEYS.IMAGE_POOL, JSON.stringify(next));
-  }, [imagePool]);
+  const removeImageFromPool = useCallback(
+    async (uri: string) => {
+      const next = imagePool.filter((u) => u !== uri);
+      setImagePool(next);
+      await AsyncStorage.setItem(STORAGE_KEYS.IMAGE_POOL, JSON.stringify(next));
+    },
+    [imagePool]
+  );
 
+  // Image folder: SAF in real APK, DocumentPicker in Expo Go
   const pickImageFolder = useCallback(async () => {
     try {
       if (SAF_AVAILABLE) {
@@ -311,7 +345,10 @@ const [MusicContextProvider, useMusicContext] = createContextHook(() => {
           const files = await SAF.readDirectoryAsync(folderUri);
           const imgs = files.filter((f) => {
             const lower = f.toLowerCase();
-            return lower.endsWith(".jpg") || lower.endsWith(".jpeg") || lower.endsWith(".png") || lower.endsWith(".webp") || lower.endsWith(".gif");
+            return (
+              lower.endsWith(".jpg") || lower.endsWith(".jpeg") ||
+              lower.endsWith(".png") || lower.endsWith(".webp") || lower.endsWith(".gif")
+            );
           });
           if (imgs.length > 0) {
             await addImagesToPool(imgs);
@@ -319,28 +356,26 @@ const [MusicContextProvider, useMusicContext] = createContextHook(() => {
           }
         }
       }
-      const { status: perm } = await MediaLibrary.requestPermissionsAsync();
-      if (perm !== "granted") return;
-      const media = await MediaLibrary.getAssetsAsync({ mediaType: "photo", first: 200 });
-      const uris = media.assets.map((a) => a.uri);
-      await addImagesToPool(uris);
+      // Expo Go: DocumentPicker for images
+      const result = await DocumentPicker.getDocumentAsync({
+        type: ["image/jpeg", "image/jpg", "image/png", "image/webp", "image/gif", "image/*"],
+        multiple: true,
+        copyToCacheDirectory: true,
+      });
+      if (!result.canceled && result.assets.length > 0) {
+        await addImagesToPool(result.assets.map((a) => a.uri));
+      }
     } catch (e) {
       console.error("pickImageFolder error", e);
-      try {
-        const { status: perm } = await MediaLibrary.requestPermissionsAsync();
-        if (perm !== "granted") return;
-        const media = await MediaLibrary.getAssetsAsync({ mediaType: "photo", first: 200 });
-        const uris = media.assets.map((a) => a.uri);
-        await addImagesToPool(uris);
-      } catch (e2) {
-        console.error("pickImageFolder fallback error", e2);
-      }
     }
   }, [addImagesToPool]);
 
-  const seekTo = useCallback((positionSecs: number) => {
-    player.seekTo(positionSecs);
-  }, [player]);
+  const seekTo = useCallback(
+    (positionSecs: number) => {
+      player.seekTo(positionSecs);
+    },
+    [player]
+  );
 
   return {
     musicFolderUri,
@@ -355,7 +390,9 @@ const [MusicContextProvider, useMusicContext] = createContextHook(() => {
     imageFolderUri,
     status,
     player,
+    SAF_AVAILABLE,
     pickMusicFolder,
+    addMoreSongs,
     rescanFolder,
     playSong,
     togglePlayPause,

@@ -1,8 +1,9 @@
-import { Ionicons } from "@expo/vector-icons";
+import { Ionicons, Feather } from "@expo/vector-icons";
 import { LinearGradient } from "expo-linear-gradient";
 import React from "react";
 import {
   ActivityIndicator,
+  Platform,
   StyleSheet,
   Text,
   TouchableOpacity,
@@ -14,15 +15,18 @@ import Colors from "@/constants/colors";
 type Props = {
   onPickFolder: () => Promise<boolean>;
   isLoading: boolean;
+  safAvailable: boolean;
 };
 
-export function SetupScreen({ onPickFolder, isLoading }: Props) {
+export function SetupScreen({ onPickFolder, isLoading, safAvailable }: Props) {
   const insets = useSafeAreaInsets();
+  const topInset = Platform.OS === "web" ? 67 : insets.top;
+  const bottomInset = Platform.OS === "web" ? 34 : insets.bottom;
 
   return (
     <LinearGradient
       colors={[Colors.dark.background, Colors.dark.backgroundSecondary]}
-      style={[styles.container, { paddingTop: insets.top + 20, paddingBottom: insets.bottom + 20 }]}
+      style={[styles.container, { paddingTop: topInset + 20, paddingBottom: bottomInset + 20 }]}
     >
       <View style={styles.iconWrapper}>
         <LinearGradient
@@ -34,9 +38,16 @@ export function SetupScreen({ onPickFolder, isLoading }: Props) {
       </View>
 
       <Text style={styles.title}>Music Player</Text>
-      <Text style={styles.subtitle}>
-        Grant access to your music library to get started.{"\n"}We'll remember your choice.
-      </Text>
+
+      {safAvailable ? (
+        <Text style={styles.subtitle}>
+          Pick a specific folder on your device.{"\n"}Only files in that folder will be loaded.
+        </Text>
+      ) : (
+        <Text style={styles.subtitle}>
+          Browse to your music folder and select the files you want to play.{"\n"}You can add more songs later.
+        </Text>
+      )}
 
       <TouchableOpacity
         style={styles.button}
@@ -54,16 +65,28 @@ export function SetupScreen({ onPickFolder, isLoading }: Props) {
             <ActivityIndicator color="#fff" />
           ) : (
             <>
-              <Ionicons name="musical-notes" size={22} color="#fff" style={{ marginRight: 10 }} />
-              <Text style={styles.buttonText}>Load My Music</Text>
+              <Feather
+                name={safAvailable ? "folder" : "file-plus"}
+                size={22}
+                color="#fff"
+                style={{ marginRight: 10 }}
+              />
+              <Text style={styles.buttonText}>
+                {safAvailable ? "Choose Music Folder" : "Select Music Files"}
+              </Text>
             </>
           )}
         </LinearGradient>
       </TouchableOpacity>
 
-      <Text style={styles.hint}>
-        Scans your device for MP3, M4A, AAC, FLAC, OGG, WAV files
-      </Text>
+      <View style={styles.tipBox}>
+        <Feather name="info" size={14} color={Colors.dark.textTertiary} style={{ marginRight: 8, marginTop: 1 }} />
+        <Text style={styles.tipText}>
+          {safAvailable
+            ? "Navigate to your music folder — all MP3, M4A, FLAC, AAC, OGG, WAV files inside will be loaded."
+            : "In the file browser, navigate to your music folder then tap the files you want (or select all). Supports MP3, M4A, FLAC, AAC, OGG, WAV."}
+        </Text>
+      </View>
     </LinearGradient>
   );
 }
@@ -103,13 +126,13 @@ const styles = StyleSheet.create({
     color: Colors.dark.textSecondary,
     textAlign: "center",
     lineHeight: 24,
-    marginBottom: 40,
+    marginBottom: 36,
   },
   button: {
     width: "100%",
     borderRadius: 16,
     overflow: "hidden",
-    marginBottom: 20,
+    marginBottom: 24,
     shadowColor: Colors.dark.accent,
     shadowOffset: { width: 0, height: 6 },
     shadowOpacity: 0.4,
@@ -128,10 +151,21 @@ const styles = StyleSheet.create({
     fontSize: 17,
     fontFamily: "Inter_600SemiBold",
   },
-  hint: {
+  tipBox: {
+    flexDirection: "row",
+    alignItems: "flex-start",
+    backgroundColor: Colors.dark.surface,
+    borderRadius: 12,
+    padding: 14,
+    borderWidth: 1,
+    borderColor: Colors.dark.border,
+    width: "100%",
+  },
+  tipText: {
+    flex: 1,
     fontSize: 13,
     color: Colors.dark.textTertiary,
     fontFamily: "Inter_400Regular",
-    textAlign: "center",
+    lineHeight: 19,
   },
 });

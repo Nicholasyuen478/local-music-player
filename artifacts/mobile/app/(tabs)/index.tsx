@@ -36,7 +36,9 @@ export default function PlayerScreen() {
     imagePool,
     isLoading,
     isSetupDone,
+    SAF_AVAILABLE,
     pickMusicFolder,
+    addMoreSongs,
     togglePlayPause,
     playNext,
     playPrev,
@@ -79,7 +81,13 @@ export default function PlayerScreen() {
   const bottomInset = Platform.OS === "web" ? 34 : insets.bottom;
 
   if (!isSetupDone) {
-    return <SetupScreen onPickFolder={handlePickFolder} isLoading={isPickingFolder || isLoading} />;
+    return (
+      <SetupScreen
+        onPickFolder={handlePickFolder}
+        isLoading={isPickingFolder || isLoading}
+        safAvailable={SAF_AVAILABLE}
+      />
+    );
   }
 
   return (
@@ -90,8 +98,16 @@ export default function PlayerScreen() {
       />
 
       <View style={styles.topBar}>
-        <TouchableOpacity onPress={rescanFolder} style={styles.iconButton} activeOpacity={0.7}>
-          <Feather name="refresh-cw" size={20} color={Colors.dark.textSecondary} />
+        <TouchableOpacity
+          onPress={SAF_AVAILABLE ? rescanFolder : addMoreSongs}
+          style={styles.iconButton}
+          activeOpacity={0.7}
+        >
+          <Feather
+            name={SAF_AVAILABLE ? "refresh-cw" : "plus-circle"}
+            size={20}
+            color={Colors.dark.textSecondary}
+          />
         </TouchableOpacity>
         <Text style={styles.topTitle}>Now Playing</Text>
         <TouchableOpacity onPress={() => setShowQueue(true)} style={styles.iconButton} activeOpacity={0.7}>
