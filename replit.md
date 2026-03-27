@@ -16,6 +16,28 @@ pnpm workspace monorepo using TypeScript. Each package manages its own dependenc
 - **API codegen**: Orval (from OpenAPI spec)
 - **Build**: esbuild (CJS bundle)
 
+## Artifacts
+
+### `artifacts/mobile` (`@workspace/mobile`)
+
+Expo React Native Android music player app. Features:
+- Background audio with lock screen controls using `expo-audio`
+- Shuffle/queue playback with playlist management
+- Music folder picker (SAF on Android, first launch only, persisted via AsyncStorage)
+- Image pool management (separate Images tab, add via file picker)
+- Random center-cropped song artwork from image pool
+- Bottom tab navigation (Player + Images)
+- EAS-buildable APK configuration
+
+Key files:
+- `context/MusicContext.tsx` — All music state (player, queue, shuffle, image pool)
+- `app/(tabs)/index.tsx` — Main player screen
+- `app/(tabs)/images.tsx` — Image pool management screen
+- `components/SongArtwork.tsx` — Random image assignment per song
+- `components/SeekBar.tsx` — Draggable seek bar
+- `components/SetupScreen.tsx` — First-launch folder picker
+- `components/QueueSheet.tsx` — Queue modal sheet
+
 ## Structure
 
 ```text
