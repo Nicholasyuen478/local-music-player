@@ -1,4 +1,4 @@
-import { Ionicons } from "@expo/vector-icons";
+import { Music } from "lucide-react-native";
 import React from "react";
 import {
   FlatList,
@@ -69,7 +69,7 @@ export function QueueSheet({ visible, onClose, queue, currentIndex, imagePool, o
                     </Text>
                   </View>
                   {isCurrent && (
-                    <Ionicons name="musical-note" size={18} color={Colors.dark.accent} />
+                    <Music size={18} color={Colors.dark.accent} />
                   )}
                 </TouchableOpacity>
               );

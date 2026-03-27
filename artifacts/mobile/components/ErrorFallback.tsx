@@ -1,5 +1,5 @@
-import { Feather } from "@expo/vector-icons";
 import { reloadAppAsync } from "expo";
+import { AlertCircle, X } from "lucide-react-native";
 import React, { useState } from "react";
 import {
   Modal,
@@ -73,7 +73,7 @@ export function ErrorFallback({ error, resetError }: ErrorFallbackProps) {
             },
           ]}
         >
-          <Feather name="alert-circle" size={20} color={theme.text} />
+          <AlertCircle size={20} color={theme.text} />
         </Pressable>
       ) : null}
 
@@ -139,7 +139,7 @@ export function ErrorFallback({ error, resetError }: ErrorFallbackProps) {
                     { opacity: pressed ? 0.6 : 1 },
                   ]}
                 >
-                  <Feather name="x" size={24} color={theme.text} />
+                  <X size={24} color={theme.text} />
                 </Pressable>
               </View>
 
@@ -223,10 +223,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 24,
     minWidth: 200,
     shadowColor: "#000",
-    shadowOffset: {
-      width: 0,
-      height: 2,
-    },
+    shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.1,
     shadowRadius: 4,
     elevation: 3,

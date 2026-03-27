@@ -1,8 +1,8 @@
-import { Feather, Ionicons } from "@expo/vector-icons";
-import { BlurView } from "expo-blur";
 import { Tabs } from "expo-router";
+import { ImageIcon, Music2 } from "lucide-react-native";
 import React from "react";
 import { Platform, StyleSheet, View } from "react-native";
+import { BlurView } from "expo-blur";
 import Colors from "@/constants/colors";
 
 export default function TabLayout() {
@@ -35,18 +35,14 @@ export default function TabLayout() {
         name="index"
         options={{
           title: "Player",
-          tabBarIcon: ({ color }) => (
-            <Ionicons name="musical-notes" size={24} color={color} />
-          ),
+          tabBarIcon: ({ color }) => <Music2 size={24} color={color} />,
         }}
       />
       <Tabs.Screen
         name="images"
         options={{
           title: "Images",
-          tabBarIcon: ({ color }) => (
-            <Feather name="image" size={22} color={color} />
-          ),
+          tabBarIcon: ({ color }) => <ImageIcon size={22} color={color} />,
         }}
       />
     </Tabs>

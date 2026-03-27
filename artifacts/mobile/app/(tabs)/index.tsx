@@ -1,6 +1,19 @@
-import { Feather, Ionicons, MaterialCommunityIcons } from "@expo/vector-icons";
 import * as Haptics from "expo-haptics";
 import { LinearGradient } from "expo-linear-gradient";
+import {
+  ChevronLeft,
+  ChevronRight,
+  List,
+  ListMusic,
+  Pause,
+  Play,
+  PlusCircle,
+  RefreshCw,
+  Shuffle,
+  SkipBack,
+  SkipForward,
+  Trash2,
+} from "lucide-react-native";
 import React, { useState, useCallback, useRef, useEffect } from "react";
 import {
   Alert,
@@ -22,7 +35,7 @@ import { SeekBar } from "@/components/SeekBar";
 import { SetupScreen } from "@/components/SetupScreen";
 import { QueueSheet } from "@/components/QueueSheet";
 
-const SWIPE_THRESHOLD = 60; // px needed to trigger skip
+const SWIPE_THRESHOLD = 60;
 
 export default function PlayerScreen() {
   const insets = useSafeAreaInsets();
@@ -79,13 +92,14 @@ export default function PlayerScreen() {
   const slideX = useRef(new Animated.Value(0)).current;
   const slideOpacity = useRef(new Animated.Value(1)).current;
 
-  // Keep fresh refs so panResponder (created once) always calls latest playback fns
   const playNextRef = useRef(playNext);
   const playPrevRef = useRef(playPrev);
-  useEffect(() => { playNextRef.current = playNext; playPrevRef.current = playPrev; }, [playNext, playPrev]);
+  useEffect(() => {
+    playNextRef.current = playNext;
+    playPrevRef.current = playPrev;
+  }, [playNext, playPrev]);
 
   function animateSongChange(direction: "left" | "right", onComplete: () => void) {
-    // Slide and fade out in swipe direction
     Animated.parallel([
       Animated.timing(slideX, {
         toValue: direction === "left" ? -width : width,
@@ -99,10 +113,8 @@ export default function PlayerScreen() {
       }),
     ]).start(() => {
       onComplete();
-      // Snap to opposite side
       slideX.setValue(direction === "left" ? width : -width);
       slideOpacity.setValue(0);
-      // Slide in
       Animated.parallel([
         Animated.spring(slideX, {
           toValue: 0,
@@ -124,19 +136,16 @@ export default function PlayerScreen() {
       onMoveShouldSetPanResponder: (_, { dx, dy }) =>
         Math.abs(dx) > 10 && Math.abs(dx) > Math.abs(dy),
       onPanResponderMove: (_, { dx }) => {
-        slideX.setValue(dx * 0.4); // subtle follow
+        slideX.setValue(dx * 0.4);
       },
       onPanResponderRelease: (_, { dx }) => {
         if (dx > SWIPE_THRESHOLD) {
-          // Left-to-right → next song (as user specified)
           Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
           animateSongChange("right", () => playNextRef.current());
         } else if (dx < -SWIPE_THRESHOLD) {
-          // Right-to-left → previous song
           Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
           animateSongChange("left", () => playPrevRef.current());
         } else {
-          // Snap back if not far enough
           Animated.spring(slideX, {
             toValue: 0,
             useNativeDriver: true,
@@ -209,19 +218,18 @@ export default function PlayerScreen() {
       <View style={styles.topBar}>
         <View style={styles.topBarLeft}>
           <TouchableOpacity onPress={handleTopAction} style={styles.iconButton} activeOpacity={0.7}>
-            <Feather
-              name={SAF_AVAILABLE ? "refresh-cw" : "plus-circle"}
-              size={20}
-              color={Colors.dark.textSecondary}
-            />
+            {SAF_AVAILABLE
+              ? <RefreshCw size={20} color={Colors.dark.textSecondary} />
+              : <PlusCircle size={20} color={Colors.dark.textSecondary} />
+            }
           </TouchableOpacity>
           <TouchableOpacity onPress={handleClearAll} style={styles.iconButton} activeOpacity={0.7}>
-            <Feather name="trash-2" size={18} color={Colors.dark.textTertiary} />
+            <Trash2 size={18} color={Colors.dark.textTertiary} />
           </TouchableOpacity>
         </View>
         <Text style={styles.topTitle}>Now Playing</Text>
         <TouchableOpacity onPress={() => setShowQueue(true)} style={styles.iconButton} activeOpacity={0.7}>
-          <Ionicons name="list" size={22} color={Colors.dark.textSecondary} />
+          <List size={22} color={Colors.dark.textSecondary} />
         </TouchableOpacity>
       </View>
 
@@ -247,11 +255,11 @@ export default function PlayerScreen() {
             borderRadius={20}
           />
 
-          {/* Swipe hint arrows */}
+          {/* Swipe hint */}
           <View style={styles.swipeHintRow} pointerEvents="none">
-            <Ionicons name="chevron-back" size={18} color="rgba(255,255,255,0.25)" />
+            <ChevronLeft size={18} color="rgba(255,255,255,0.25)" />
             <Text style={styles.swipeHint}>swipe to skip</Text>
-            <Ionicons name="chevron-forward" size={18} color="rgba(255,255,255,0.25)" />
+            <ChevronRight size={18} color="rgba(255,255,255,0.25)" />
           </View>
         </Animated.View>
       </View>
@@ -283,16 +291,12 @@ export default function PlayerScreen() {
       {/* Playback controls */}
       <View style={styles.controls}>
         <TouchableOpacity onPress={handleShuffle} style={styles.controlIconBtn} activeOpacity={0.7}>
-          <Ionicons
-            name="shuffle"
-            size={24}
-            color={shuffleEnabled ? Colors.dark.accent : Colors.dark.textTertiary}
-          />
+          <Shuffle size={24} color={shuffleEnabled ? Colors.dark.accent : Colors.dark.textTertiary} />
           {shuffleEnabled && <View style={styles.activeDot} />}
         </TouchableOpacity>
 
         <TouchableOpacity onPress={handlePrev} style={styles.controlIconBtn} activeOpacity={0.7}>
-          <Ionicons name="play-skip-back" size={32} color={Colors.dark.text} />
+          <SkipBack size={32} color={Colors.dark.text} />
         </TouchableOpacity>
 
         <TouchableOpacity onPress={handlePlayPause} activeOpacity={0.8} style={styles.playBtn}>
@@ -300,21 +304,19 @@ export default function PlayerScreen() {
             colors={[Colors.dark.accent, Colors.dark.accentDark]}
             style={styles.playBtnGradient}
           >
-            <Ionicons
-              name={status.playing ? "pause" : "play"}
-              size={34}
-              color="#fff"
-              style={{ marginLeft: status.playing ? 0 : 3 }}
-            />
+            {status.playing
+              ? <Pause size={34} color="#fff" />
+              : <Play size={34} color="#fff" style={{ marginLeft: 3 }} />
+            }
           </LinearGradient>
         </TouchableOpacity>
 
         <TouchableOpacity onPress={handleNext} style={styles.controlIconBtn} activeOpacity={0.7}>
-          <Ionicons name="play-skip-forward" size={32} color={Colors.dark.text} />
+          <SkipForward size={32} color={Colors.dark.text} />
         </TouchableOpacity>
 
         <TouchableOpacity onPress={() => setShowQueue(true)} style={styles.controlIconBtn} activeOpacity={0.7}>
-          <MaterialCommunityIcons name="playlist-music" size={26} color={Colors.dark.textTertiary} />
+          <ListMusic size={26} color={Colors.dark.textTertiary} />
         </TouchableOpacity>
       </View>
 

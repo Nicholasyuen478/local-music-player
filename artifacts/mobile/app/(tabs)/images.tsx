@@ -1,8 +1,8 @@
-import { Feather, Ionicons } from "@expo/vector-icons";
 import * as DocumentPicker from "expo-document-picker";
 import * as Haptics from "expo-haptics";
 import { Image } from "expo-image";
 import { LinearGradient } from "expo-linear-gradient";
+import { Folder, FolderPlus, ImageIcon, Images, Plus, X } from "lucide-react-native";
 import React, { useState } from "react";
 import {
   Alert,
@@ -83,7 +83,7 @@ export default function ImagesScreen() {
             onPress={handlePickFolder}
             activeOpacity={0.7}
           >
-            <Feather name="folder" size={18} color={Colors.dark.textSecondary} />
+            <Folder size={18} color={Colors.dark.textSecondary} />
           </TouchableOpacity>
           <TouchableOpacity
             style={[styles.addBtn, isAdding && styles.addBtnDisabled]}
@@ -95,7 +95,7 @@ export default function ImagesScreen() {
               colors={[Colors.dark.accent, Colors.dark.accentDark]}
               style={styles.addBtnGradient}
             >
-              <Ionicons name="add" size={22} color="#fff" />
+              <Plus size={22} color="#fff" />
             </LinearGradient>
           </TouchableOpacity>
         </View>
@@ -111,7 +111,7 @@ export default function ImagesScreen() {
             colors={[Colors.dark.surface, Colors.dark.surfaceSecondary]}
             style={styles.emptyIconBg}
           >
-            <Feather name="image" size={40} color={Colors.dark.textTertiary} />
+            <ImageIcon size={40} color={Colors.dark.textTertiary} />
           </LinearGradient>
           <Text style={styles.emptyTitle}>No images yet</Text>
           <Text style={styles.emptySub}>
@@ -123,12 +123,12 @@ export default function ImagesScreen() {
                 colors={[Colors.dark.accent, Colors.dark.accentDark]}
                 style={styles.emptyBtnGradient}
               >
-                <Ionicons name="images" size={18} color="#fff" style={{ marginRight: 8 }} />
+                <Images size={18} color="#fff" style={{ marginRight: 8 }} />
                 <Text style={styles.emptyBtnText}>Add Images</Text>
               </LinearGradient>
             </TouchableOpacity>
             <TouchableOpacity style={styles.emptyBtnOutline} onPress={handlePickFolder} activeOpacity={0.8}>
-              <Feather name="folder-plus" size={18} color={Colors.dark.accent} style={{ marginRight: 8 }} />
+              <FolderPlus size={18} color={Colors.dark.accent} style={{ marginRight: 8 }} />
               <Text style={styles.emptyBtnOutlineText}>Pick Folder</Text>
             </TouchableOpacity>
           </View>
@@ -159,7 +159,7 @@ export default function ImagesScreen() {
                 hitSlop={{ top: 4, bottom: 4, left: 4, right: 4 }}
               >
                 <View style={styles.removeBtnInner}>
-                  <Ionicons name="close" size={12} color="#fff" />
+                  <X size={12} color="#fff" />
                 </View>
               </TouchableOpacity>
             </TouchableOpacity>

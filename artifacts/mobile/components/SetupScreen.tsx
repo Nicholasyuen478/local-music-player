@@ -1,5 +1,5 @@
-import { Feather, Ionicons } from "@expo/vector-icons";
 import { LinearGradient } from "expo-linear-gradient";
+import { FilePlus, Folder, Music2 } from "lucide-react-native";
 import React from "react";
 import {
   ActivityIndicator,
@@ -40,13 +40,12 @@ export function SetupScreen({ onPickFolder, isLoading, safAvailable }: Props) {
       colors={[Colors.dark.background, Colors.dark.backgroundSecondary]}
       style={[styles.container, { paddingTop: topInset + 20, paddingBottom: bottomInset + 20 }]}
     >
-      {/* Icon */}
       <View style={styles.iconWrapper}>
         <LinearGradient
           colors={[Colors.dark.accent, Colors.dark.accentDark]}
           style={styles.iconGradient}
         >
-          <Ionicons name="musical-notes" size={52} color="#fff" />
+          <Music2 size={52} color="#fff" />
         </LinearGradient>
       </View>
 
@@ -57,7 +56,6 @@ export function SetupScreen({ onPickFolder, isLoading, safAvailable }: Props) {
           : "Tap below to open your file browser and select your music files."}
       </Text>
 
-      {/* Step-by-step guide for Expo Go file picker */}
       {!safAvailable && (
         <View style={styles.stepsCard}>
           <Text style={styles.stepsTitle}>How to load your music folder:</Text>
@@ -85,12 +83,10 @@ export function SetupScreen({ onPickFolder, isLoading, safAvailable }: Props) {
             <ActivityIndicator color="#fff" />
           ) : (
             <>
-              <Feather
-                name={safAvailable ? "folder" : "file-plus"}
-                size={22}
-                color="#fff"
-                style={{ marginRight: 10 }}
-              />
+              {safAvailable
+                ? <Folder size={22} color="#fff" style={{ marginRight: 10 }} />
+                : <FilePlus size={22} color="#fff" style={{ marginRight: 10 }} />
+              }
               <Text style={styles.buttonText}>
                 {safAvailable ? "Choose Music Folder" : "Open File Browser"}
               </Text>
