@@ -53,11 +53,13 @@ export default function PlayerScreen() {
     imagePool,
     isLoading,
     isSetupDone,
+    hasCustomImages,
     SAF_AVAILABLE,
     pickMusicFolder,
     addMoreSongs,
     rescanFolder,
     resetSetup,
+    pickImageFolder,
     togglePlayPause,
     playNext,
     playPrev,
@@ -162,14 +164,30 @@ export default function PlayerScreen() {
   const handlePickFolder = useCallback(async () => {
     setIsPickingFolder(true);
     try {
-      await pickMusicFolder();
+      const success = await pickMusicFolder();
+      if (success && !hasCustomImages) {
+        // First-launch only: prompt to also pick an image folder for artwork
+        Alert.alert(
+          "Add Song Artwork",
+          "Pick a folder of images to use as album artwork. The app will randomly pick one for each song.",
+          [
+            { text: "Skip for now", style: "cancel" },
+            {
+              text: "Pick Image Folder",
+              onPress: async () => {
+                await pickImageFolder();
+              },
+            },
+          ]
+        );
+      }
     } catch (e) {
       console.error("handlePickFolder error", e);
     } finally {
       setIsPickingFolder(false);
     }
     return true;
-  }, [pickMusicFolder]);
+  }, [pickMusicFolder, pickImageFolder, hasCustomImages]);
 
   const handleTopAction = useCallback(() => {
     if (SAF_AVAILABLE) rescanFolder();

@@ -1,0 +1,292 @@
+from fastapi import Depends
+from typing import List
+import asyncio
+import json
+import uuid
+from PIL import Image
+
+from common.agent.schemas import ModelProvider
+from common.exceptions import InternalServiceError
+from common.loggers import logger
+from .interfaces import RelabelServiceInterface, LayoutRepositoryInterface
+from .schemas import (
+    STRUCTURE_OUTPUT_DIR,
+    ReadingOrderPIILayoutChunkRes,
+    RELABEL_CONCURRENCY,
+    PII_CONCURRENCY,
+    LAYOUT_JSON_EXTRACT_QUERY,
+    PARSING_RES_JSON_EXTRACT_QUERY,
+)
+from .layout_image_saver import RelabelResultSaver
+from .layout_repository import get_layout_repository
+from common.guardrails import (
+    get_pii_guardrail_hook,
+    PiiGuardrailHookInterface,
+)
+
+
+class RelabelService(RelabelServiceInterface):
+    def __init__(
+        self,
+        layout_repository: LayoutRepositoryInterface,
+        pii_guardrail_hook: PiiGuardrailHookInterface,
+    ):
+        self.layout_repository = layout_repository
+        self.relabel_saver = RelabelResultSaver()
+        self.pii_guardrail_hook = pii_guardrail_hook
+
+    async def analyze_structure_and_relabel(
+        self,
+        image_urls: List[str],
+        model_id: str,
+        provider: ModelProvider = ModelProvider.LITE_LLM,
+    ) -> None:
+        layout_det_res, results = await self._run_detection_pipeline(
+            image_urls,
+            model_id,
+            provider,
+            self.layout_repository.run_llm_layout_relabel,
+        )
+
+        logger.error(f"results {results}, layout_det_res{layout_det_res}")
+        await self._save(
+            image_urls, layout_det_res, results, ReadingOrderPIILayoutChunkRes, model_id
+        )
+
+    async def analyze_structure_relabel_and_pii_by_llm(
+        self,
+        image_urls: List[str],
+        model_id: str,
+        provider: ModelProvider = ModelProvider.LITE_LLM,
+    ) -> None:
+        layout_det_res, results = await self._run_detection_pipeline(
+            image_urls,
+            model_id,
+            provider,
+            self.layout_repository.run_llm_layout_relabel_and_pii,
+        )
+        await self._save(
+            image_urls, layout_det_res, results, ReadingOrderPIILayoutChunkRes, model_id
+        )
+
+    async def analyze_structure_relabel_and_pii_by_llms(
+        self,
+        image_urls: List[str],
+        model_id: str,
+        provider: ModelProvider = ModelProvider.LITE_LLM,
+    ) -> None:
+        layout_det_res, relabel_results = await self._run_detection_pipeline(
+            image_urls,
+            model_id,
+            provider,
+            self.layout_repository.run_llm_layout_relabel,
+        )
+        pii_results = await self._run_batch(
+            image_urls,
+            self._extract_relabel_res(relabel_results),
+            self.layout_repository.run_llm_layout_pii,
+            model_id,
+            provider,
+            PII_CONCURRENCY,
+        )
+
+        await self._save(
+            image_urls,
+            layout_det_res,
+            pii_results,
+            ReadingOrderPIILayoutChunkRes,
+            model_id,
+        )
+
+    async def analyze_structure_relabel_and_pii_by_guardrail(
+        self,
+        image_urls: List[str],
+    ) -> None:
+        parsing_res_list = self._extract_parsing_res_list(
+            await self._run_structure_detection(image_urls)
+        )
+
+        pii_results = await self._run_batch_pii_guardrail(
+            image_urls,
+            [parsing_res for _, parsing_res in parsing_res_list],
+        )
+        logger.error(f"pii_results,{pii_results}")
+        await self._save(
+            image_urls,
+            parsing_res_list,
+            pii_results,
+            ReadingOrderPIILayoutChunkRes,
+        )
+
+    def _scan_layout_json_for_pii(self, layout_json: str | dict) -> dict:
+        try:
+            tagged_boxes = self.pii_guardrail_hook.scan_layout_json(layout_json)
+
+            layout_data = (
+                json.loads(layout_json) if isinstance(layout_json, str) else layout_json
+            )
+            layout_data["boxes"] = tagged_boxes
+
+            return layout_data
+
+        except Exception as e:
+            raise InternalServiceError(f"PII guardrail scan failed: {e}")
+
+    async def _run_batch_pii_guardrail(
+        self,
+        image_urls: List[str],
+        layout_jsons: List[str | dict],
+        concurrency: int = PII_CONCURRENCY,
+    ) -> list:
+        semaphore = asyncio.Semaphore(concurrency)
+
+        async def _one(url: str, layout_json: str | dict):
+            async with semaphore:
+                return await asyncio.to_thread(
+                    self._scan_layout_json_for_pii, layout_json
+                )
+
+        coros = [_one(url, lj) for url, lj in zip(image_urls, layout_jsons)]
+        logger.info(f"Guardrail PII batch queued: {len(coros)} page(s)")
+        return await asyncio.gather(*coros, return_exceptions=True)
+
+    async def _run_detection_pipeline(
+        self,
+        image_urls: List[str],
+        model_id: str,
+        provider: ModelProvider,
+        repo_fn,
+        concurrency: int = RELABEL_CONCURRENCY,
+    ) -> tuple[list, list]:
+        layout_det_res = self._extract_layout_det_res(
+            await self._run_structure_detection(image_urls)
+        )
+        results = await self._run_batch(
+            image_urls,
+            [layout_json for _, layout_json in layout_det_res],
+            repo_fn,
+            model_id,
+            provider,
+            concurrency,
+        )
+        return layout_det_res, results
+
+    async def _run_structure_detection(self, image_urls: List[str]) -> list:
+        raw = await asyncio.to_thread(
+            self.layout_repository.run_structure_detection, image_urls
+        )
+        logger.info(f"Structure detection complete: {len(raw)} pages")
+        return raw
+
+    def _extract_parsing_res_list(
+        self, raw_results: list
+    ) -> list[tuple[Image.Image, str]]:
+        parsing_res_list = [
+            (
+                raw.img["layout_det_res"].copy(),
+                json.dumps(
+                    PARSING_RES_JSON_EXTRACT_QUERY.search(raw.json),
+                    separators=(",", ":"),
+                    ensure_ascii=False,
+                ),
+            )
+            for raw in raw_results
+        ]
+        del raw_results
+        return parsing_res_list
+
+    def _extract_layout_det_res(
+        self, raw_results: list
+    ) -> list[tuple[Image.Image, str]]:
+        layout_det_res = [
+            (
+                raw.img["layout_det_res"].copy(),
+                json.dumps(
+                    LAYOUT_JSON_EXTRACT_QUERY.search(raw.json),
+                    separators=(",", ":"),
+                    ensure_ascii=False,
+                ),
+            )
+            for raw in raw_results
+        ]
+        del raw_results
+        return layout_det_res
+
+    def _extract_relabel_res(self, relabel_results: list) -> list[str]:
+        return [
+            json.dumps(
+                r.model_dump(),
+                separators=(",", ":"),
+                ensure_ascii=False,
+            )
+            if isinstance(r, ReadingOrderPIILayoutChunkRes)
+            else ""
+            for r in relabel_results
+        ]
+
+    async def _run_batch(
+        self,
+        image_urls: List[str],
+        layout_jsons: List[str],
+        repo_fn,
+        model_id: str,
+        provider: ModelProvider,
+        concurrency: int,
+    ) -> list:
+        semaphore = asyncio.Semaphore(concurrency)
+
+        async def _one(url: str, layout_json: str):
+            async with semaphore:
+                return await asyncio.to_thread(
+                    repo_fn,
+                    image_url=url,
+                    layout_chunk_json=layout_json,
+                    model_id=model_id,
+                    provider=provider,
+                )
+
+        coros = [_one(url, lj) for url, lj in zip(image_urls, layout_jsons)]
+        logger.info(f"Batch queued: {len(coros)} page(s) via {repo_fn.__name__}")
+        return await asyncio.gather(*coros, return_exceptions=True)
+
+    async def _save(
+        self,
+        image_urls: List[str],
+        layout_det_res: list,
+        results: list,
+        result_type: type,
+        model_id: str | None = None,
+    ) -> None:
+        try:
+            run_id = uuid.uuid4().hex[:8]
+            output_dir = STRUCTURE_OUTPUT_DIR / run_id
+            output_dir.mkdir(parents=True, exist_ok=True)
+
+            valid_pages = [
+                (img, r if isinstance(r, result_type) else result_type(**r))
+                for (img, _), r in zip(layout_det_res, results)
+                if not isinstance(r, Exception)
+                and (r if isinstance(r, result_type) else result_type(**r)).boxes
+            ]
+
+            if not valid_pages:
+                logger.warning(f"No valid results [{result_type.__name__}]")
+                return
+
+            valid_images, valid_results = zip(*valid_pages)
+            self.relabel_saver.save_batch(
+                list(valid_images), list(valid_results), model_id, output_dir=output_dir
+            )
+            logger.info(f"Saved {len(valid_results)}/{len(image_urls)} → {output_dir}")
+
+        except asyncio.TimeoutError:
+            raise InternalServiceError("Structure detection timed out")
+        except (KeyError, IndexError, json.JSONDecodeError) as e:
+            raise InternalServiceError(f"Invalid layout data: {e}")
+
+
+def get_relabel_service(
+    layout_repository: LayoutRepositoryInterface = Depends(get_layout_repository),
+    pii_guardrail_hook: PiiGuardrailHookInterface = Depends(get_pii_guardrail_hook),
+) -> RelabelService:
+    return RelabelService(layout_repository, pii_guardrail_hook)

@@ -3,7 +3,8 @@ import createContextHook from "@nkzw/create-context-hook";
 import { useAudioPlayer, useAudioPlayerStatus, setAudioModeAsync } from "expo-audio";
 import * as DocumentPicker from "expo-document-picker";
 import * as FileSystem from "expo-file-system";
-import React, { useCallback, useEffect, useState } from "react";
+import React, { useCallback, useEffect, useRef, useState } from "react";
+import { getDefaultArtworkUris } from "@/constants/defaultArtworks";
 
 export type Song = {
   id: string;
@@ -18,13 +19,14 @@ const STORAGE_KEYS = {
   MUSIC_FOLDER: "music_folder_uri",
   SONGS: "cached_songs",
   IMAGE_POOL: "image_pool",
+  IMAGE_POOL_CUSTOM: "image_pool_custom",   // tracks user-added URIs separately
   IMAGE_FOLDER: "image_folder_uri",
   QUEUE: "playback_queue",
   CURRENT_INDEX: "current_index",
   SHUFFLE: "shuffle_enabled",
 };
 
-// SAF (Storage Access Framework) is only available in real native builds, not Expo Go
+// SAF is only available in real native builds, not Expo Go
 const SAF = FileSystem.StorageAccessFramework;
 const SAF_AVAILABLE = !!SAF && typeof SAF?.requestDirectoryPermissionsAsync === "function";
 
@@ -39,7 +41,6 @@ function parseSongMeta(filename: string, uri: string, duration?: number): Song {
   return { id: uri, title, artist, uri, filename, duration };
 }
 
-// Real APK build: use SAF to pick and scan a folder
 async function scanMusicFolderSAF(folderUri: string): Promise<Song[]> {
   try {
     const files = await SAF.readDirectoryAsync(folderUri);
@@ -60,16 +61,13 @@ async function scanMusicFolderSAF(folderUri: string): Promise<Song[]> {
   }
 }
 
-// Expo Go: open file picker, user navigates to folder and selects files
 async function pickAudioViaDocumentPicker(): Promise<Song[]> {
   const result = await DocumentPicker.getDocumentAsync({
-    type: "*/*",          // Most reliable on all Android versions
+    type: "*/*",
     multiple: true,
     copyToCacheDirectory: false,
   });
-
   if (result.canceled || !result.assets || result.assets.length === 0) return [];
-
   return result.assets
     .filter((a) => {
       const name = (a.name || a.uri).toLowerCase();
@@ -115,11 +113,14 @@ const [MusicContextProvider, useMusicContext] = createContextHook(() => {
   const [imagePool, setImagePool] = useState<string[]>([]);
   const [imageFolderUri, setImageFolderUri] = useState<string | null>(null);
   const [isSetupDone, setIsSetupDone] = useState(false);
+  // Whether the user has ever explicitly picked an image folder / added custom images
+  const [hasCustomImages, setHasCustomImages] = useState(false);
 
   const player = useAudioPlayer(null);
   const status = useAudioPlayerStatus(player);
   const currentSong = queue[currentIndex] ?? null;
 
+  // Background audio + lock screen controls
   useEffect(() => {
     setAudioModeAsync({
       playsInSilentMode: true,
@@ -135,11 +136,12 @@ const [MusicContextProvider, useMusicContext] = createContextHook(() => {
   async function loadPersistedData() {
     setIsLoading(true);
     try {
-      const [folderUri, cachedSongs, pool, imgFolder, savedQueue, savedIndex, savedShuffle] =
+      const [folderUri, cachedSongs, pool, customFlag, imgFolder, savedQueue, savedIndex, savedShuffle] =
         await Promise.all([
           AsyncStorage.getItem(STORAGE_KEYS.MUSIC_FOLDER),
           AsyncStorage.getItem(STORAGE_KEYS.SONGS),
           AsyncStorage.getItem(STORAGE_KEYS.IMAGE_POOL),
+          AsyncStorage.getItem(STORAGE_KEYS.IMAGE_POOL_CUSTOM),
           AsyncStorage.getItem(STORAGE_KEYS.IMAGE_FOLDER),
           AsyncStorage.getItem(STORAGE_KEYS.QUEUE),
           AsyncStorage.getItem(STORAGE_KEYS.CURRENT_INDEX),
@@ -147,9 +149,18 @@ const [MusicContextProvider, useMusicContext] = createContextHook(() => {
         ]);
 
       if (folderUri) setMusicFolderUri(folderUri);
-      if (pool) setImagePool(JSON.parse(pool));
       if (imgFolder) setImageFolderUri(imgFolder);
       if (savedShuffle) setShuffleEnabled(savedShuffle === "true");
+      if (customFlag === "true") setHasCustomImages(true);
+
+      // Image pool: load saved or fall back to bundled defaults
+      if (pool) {
+        setImagePool(JSON.parse(pool));
+      } else {
+        const defaults = await getDefaultArtworkUris();
+        setImagePool(defaults);
+        // Don't persist defaults — they get re-resolved fresh each launch
+      }
 
       if (cachedSongs) {
         const parsed: Song[] = JSON.parse(cachedSongs);
@@ -170,7 +181,8 @@ const [MusicContextProvider, useMusicContext] = createContextHook(() => {
     }
   }
 
-  // Main pick entry: SAF folder in real APK, file picker in Expo Go
+  // ── Music setup ──────────────────────────────────────────────────────────
+
   const pickMusicFolder = useCallback(async (): Promise<boolean> => {
     try {
       if (SAF_AVAILABLE) {
@@ -199,7 +211,6 @@ const [MusicContextProvider, useMusicContext] = createContextHook(() => {
         setQueue(found);
         setCurrentIndex(0);
         setIsSetupDone(true);
-        // Auto-load the first song so the player is ready
         player.replace({ uri: found[0].uri });
         await Promise.all([
           AsyncStorage.setItem(STORAGE_KEYS.MUSIC_FOLDER, "picker"),
@@ -215,7 +226,6 @@ const [MusicContextProvider, useMusicContext] = createContextHook(() => {
     }
   }, [player]);
 
-  // Add more files on top of existing songs (Expo Go)
   const addMoreSongs = useCallback(async () => {
     try {
       const found = await pickAudioViaDocumentPicker();
@@ -235,7 +245,6 @@ const [MusicContextProvider, useMusicContext] = createContextHook(() => {
     }
   }, [songs]);
 
-  // Rescan: re-read from SAF folder (real APK) or re-open picker (Expo Go)
   const rescanFolder = useCallback(async () => {
     if (!musicFolderUri) return;
     setIsLoading(true);
@@ -255,7 +264,6 @@ const [MusicContextProvider, useMusicContext] = createContextHook(() => {
     }
   }, [musicFolderUri, addMoreSongs]);
 
-  // Reset to setup screen
   const resetSetup = useCallback(async () => {
     await Promise.all([
       AsyncStorage.removeItem(STORAGE_KEYS.MUSIC_FOLDER),
@@ -327,17 +335,27 @@ const [MusicContextProvider, useMusicContext] = createContextHook(() => {
     await AsyncStorage.setItem(STORAGE_KEYS.QUEUE, JSON.stringify(newOrder));
   }, [shuffleEnabled, songs, currentSong]);
 
+  // Fix: use a ref so the didJustFinish effect always calls the latest playNext
+  const playNextRef = useRef(playNext);
+  useEffect(() => { playNextRef.current = playNext; }, [playNext]);
+
   useEffect(() => {
-    if (status.didJustFinish) playNext();
+    if (status.didJustFinish) {
+      playNextRef.current();
+    }
   }, [status.didJustFinish]);
 
   // ── Image pool ──────────────────────────────────────────────────────────
 
   const addImagesToPool = useCallback(
-    async (uris: string[]) => {
+    async (uris: string[], isCustom = true) => {
       const next = [...new Set([...imagePool, ...uris])];
       setImagePool(next);
       await AsyncStorage.setItem(STORAGE_KEYS.IMAGE_POOL, JSON.stringify(next));
+      if (isCustom) {
+        setHasCustomImages(true);
+        await AsyncStorage.setItem(STORAGE_KEYS.IMAGE_POOL_CUSTOM, "true");
+      }
     },
     [imagePool]
   );
@@ -356,20 +374,27 @@ const [MusicContextProvider, useMusicContext] = createContextHook(() => {
       if (SAF_AVAILABLE) {
         const perm = await SAF.requestDirectoryPermissionsAsync();
         if (perm.granted) {
+          setImageFolderUri(perm.directoryUri);
+          await AsyncStorage.setItem(STORAGE_KEYS.IMAGE_FOLDER, perm.directoryUri);
           const files = await SAF.readDirectoryAsync(perm.directoryUri);
           const imgs = files.filter((f) =>
             IMAGE_EXTENSIONS.some((ext) => f.toLowerCase().endsWith(ext))
           );
           if (imgs.length > 0) {
-            await addImagesToPool(imgs);
-            return;
+            await addImagesToPool(imgs, true);
+            return true;
           }
         }
       }
       const uris = await pickImagesViaDocumentPicker();
-      if (uris.length > 0) await addImagesToPool(uris);
+      if (uris.length > 0) {
+        await addImagesToPool(uris, true);
+        return true;
+      }
+      return false;
     } catch (e) {
       console.error("pickImageFolder error", e);
+      return false;
     }
   }, [addImagesToPool]);
 
@@ -386,6 +411,7 @@ const [MusicContextProvider, useMusicContext] = createContextHook(() => {
     isSetupDone,
     imagePool,
     imageFolderUri,
+    hasCustomImages,
     status,
     player,
     SAF_AVAILABLE,

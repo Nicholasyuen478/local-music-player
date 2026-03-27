@@ -38,6 +38,7 @@
         }
       ],
       "expo-font",
+      "expo-asset",
       "expo-web-browser",
       [
         "expo-audio",
@@ -50,8 +51,7 @@
         {
           "iCloudContainerEnvironment": "Production"
         }
-      ],
-      "expo-media-library"
+      ]
     ],
     "experiments": {
       "typedRoutes": true,
