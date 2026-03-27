@@ -11,7 +11,6 @@ import {
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import Colors from "@/constants/colors";
 import { useMusicContext } from "@/context/MusicContext";
-import { SongArtwork } from "@/components/SongArtwork";
 import type { Song } from "@/context/MusicContext";
 
 export default function LibraryScreen() {
@@ -20,7 +19,6 @@ export default function LibraryScreen() {
     queue,
     currentIndex,
     currentSong,
-    imagePool,
     isSetupDone,
     playSong,
   } = useMusicContext();
@@ -37,7 +35,6 @@ export default function LibraryScreen() {
         onPress={() => playSong(item, queue, index)}
         activeOpacity={0.6}
       >
-        <SongArtwork imagePool={imagePool} songId={item.id} size={48} borderRadius={3} />
         <View style={styles.rowText}>
           <Text
             style={[styles.title, isActive && styles.titleActive]}
@@ -49,9 +46,7 @@ export default function LibraryScreen() {
             {item.artist}
           </Text>
         </View>
-        {isActive && (
-          <View style={styles.activeBar} />
-        )}
+        {isActive && <View style={styles.activeBar} />}
       </TouchableOpacity>
     );
   };
@@ -77,12 +72,10 @@ export default function LibraryScreen() {
           renderItem={renderItem}
           contentContainerStyle={{ paddingBottom: bottomInset + 16 }}
           showsVerticalScrollIndicator={false}
-          initialScrollIndex={
-            currentIndex > 2 ? Math.max(0, currentIndex - 2) : 0
-          }
+          initialScrollIndex={currentIndex > 2 ? Math.max(0, currentIndex - 2) : 0}
           getItemLayout={(_, index) => ({
-            length: 68,
-            offset: 68 * index,
+            length: ITEM_HEIGHT,
+            offset: ITEM_HEIGHT * index,
             index,
           })}
         />
@@ -91,12 +84,14 @@ export default function LibraryScreen() {
   );
 }
 
+const ITEM_HEIGHT = 56;
+
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: Colors.dark.background },
   header: {
     paddingHorizontal: 24,
     paddingTop: 8,
-    paddingBottom: 16,
+    paddingBottom: 12,
   },
   headerCount: {
     color: Colors.dark.textTertiary,
@@ -110,8 +105,7 @@ const styles = StyleSheet.create({
     alignItems: "center",
     paddingHorizontal: 24,
     paddingVertical: 10,
-    gap: 14,
-    height: 68,
+    height: ITEM_HEIGHT,
   },
   rowActive: {
     backgroundColor: "rgba(255,255,255,0.04)",
@@ -127,15 +121,16 @@ const styles = StyleSheet.create({
   },
   artist: {
     color: Colors.dark.textTertiary,
-    fontSize: 13,
+    fontSize: 12,
     fontFamily: "Inter_400Regular",
     marginTop: 2,
   },
   activeBar: {
     width: 3,
-    height: 20,
+    height: 18,
     borderRadius: 2,
     backgroundColor: Colors.dark.accent,
+    marginLeft: 12,
   },
   empty: {
     flex: 1,

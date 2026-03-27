@@ -3,6 +3,7 @@ import createContextHook from "@nkzw/create-context-hook";
 import { useAudioPlayer, useAudioPlayerStatus, setAudioModeAsync } from "expo-audio";
 import * as DocumentPicker from "expo-document-picker";
 import * as FileSystem from "expo-file-system";
+import * as ImagePicker from "expo-image-picker";
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import { getDefaultArtworkUris } from "@/constants/defaultArtworks";
 
@@ -63,7 +64,8 @@ async function scanMusicFolderSAF(folderUri: string): Promise<Song[]> {
 
 async function pickAudioViaDocumentPicker(): Promise<Song[]> {
   const result = await DocumentPicker.getDocumentAsync({
-    type: "*/*",
+    // audio/* tells the OS file picker to filter to audio files only
+    type: ["audio/*"],
     multiple: true,
     copyToCacheDirectory: false,
   });
@@ -79,19 +81,17 @@ async function pickAudioViaDocumentPicker(): Promise<Song[]> {
     });
 }
 
-async function pickImagesViaDocumentPicker(): Promise<string[]> {
-  const result = await DocumentPicker.getDocumentAsync({
-    type: "*/*",
-    multiple: true,
-    copyToCacheDirectory: true,
+async function pickImagesViaGallery(): Promise<string[]> {
+  const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
+  if (status !== "granted") return [];
+  const result = await ImagePicker.launchImageLibraryAsync({
+    mediaTypes: ["images"],
+    allowsMultipleSelection: true,
+    quality: 1,
+    exif: false,
   });
   if (result.canceled || !result.assets) return [];
-  return result.assets
-    .filter((a) => {
-      const name = (a.name || a.uri).toLowerCase();
-      return IMAGE_EXTENSIONS.some((ext) => name.endsWith(ext));
-    })
-    .map((a) => a.uri);
+  return result.assets.map((a) => a.uri);
 }
 
 function shuffleArray<T>(arr: T[]): T[] {
@@ -386,7 +386,7 @@ const [MusicContextProvider, useMusicContext] = createContextHook(() => {
           }
         }
       }
-      const uris = await pickImagesViaDocumentPicker();
+      const uris = await pickImagesViaGallery();
       if (uris.length > 0) {
         await addImagesToPool(uris, true);
         return true;

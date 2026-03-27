@@ -1,6 +1,6 @@
-import * as DocumentPicker from "expo-document-picker";
 import * as Haptics from "expo-haptics";
 import { Image } from "expo-image";
+import * as ImagePicker from "expo-image-picker";
 import { FolderOpen, ImageIcon, Plus, X } from "lucide-react-native";
 import React, { useState } from "react";
 import {
@@ -30,10 +30,13 @@ export default function ImagesScreen() {
   const handlePickFiles = async () => {
     setIsAdding(true);
     try {
-      const result = await DocumentPicker.getDocumentAsync({
-        type: ["image/jpeg", "image/jpg", "image/png", "image/webp", "image/gif"],
-        multiple: true,
-        copyToCacheDirectory: true,
+      const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
+      if (status !== "granted") return;
+      const result = await ImagePicker.launchImageLibraryAsync({
+        mediaTypes: ["images"],
+        allowsMultipleSelection: true,
+        quality: 1,
+        exif: false,
       });
       if (!result.canceled && result.assets.length > 0) {
         const uris = result.assets.map((a) => a.uri);
