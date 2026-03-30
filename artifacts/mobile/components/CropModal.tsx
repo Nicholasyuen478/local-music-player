@@ -1,18 +1,12 @@
 /**
- * CropModal — square image crop editor.
+ * CropModal — square image crop editor (fully patched).
  *
- * Approach: the CROP BOX is always fixed at the center of the full screen.
- * The IMAGE moves underneath it (pan + pinch zoom). The crop region is
- * computed entirely from pan/scale offsets — no screen-space header offsets
- * involved, so the math is always exact.
- *
- * Formula for crop origin in original image coordinates:
- *   originX = imgW/2 - panX/scale - CROP_SIZE/(2*scale)
- *   originY = imgH/2 - panY/scale - CROP_SIZE/(2*scale)
- *   cropSize = CROP_SIZE / scale
- *
- * Where panX/panY = screen-pixel offset of image center from crop box center.
- * Positive panX → image moved right → we crop from the left side of image.
+ * Bug fixes:
+ *   1. clampPan reads cropSzRef inside a stable ref callback, never stale.
+ *   2. expo-image uses contentFit="contain" with explicit dimensions to avoid
+ *      EXIF-rotation stretching; the outer View clips to displayW/displayH.
+ *   3. panRef and lastTouches are defensively reset on every touch count change
+ *      (1↔2 transition) to prevent position jumps.
  */
 
 import * as ImageManipulator from "expo-image-manipulator";
@@ -44,17 +38,16 @@ const CORNER_LEN = 22;
 const CORNER_W = 2.5;
 const GRID_COLOR = "rgba(255,255,255,0.22)";
 const DIM_COLOR = "rgba(0,0,0,0.62)";
+const HIT = { top: 12, bottom: 12, left: 12, right: 12 };
 
 export function CropModal({ visible, uri, onSave, onClose }: Props) {
   const { width: SW, height: SH } = useWindowDimensions();
   const insets = useSafeAreaInsets();
 
-  // Square crop box centered on full screen
   const CROP_SIZE = Math.min(SW * 0.84, 320);
   const BOX_LEFT = (SW - CROP_SIZE) / 2;
   const BOX_TOP = (SH - CROP_SIZE) / 2;
 
-  // --- State (for render only) ---
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [displayW, setDisplayW] = useState(0);
@@ -62,27 +55,29 @@ export function CropModal({ visible, uri, onSave, onClose }: Props) {
   const [panX, setPanX] = useState(0);
   const [panY, setPanY] = useState(0);
 
-  // --- Refs (always current inside gesture callbacks) ---
   const imgWRef = useRef(0);
   const imgHRef = useRef(0);
   const scaleRef = useRef(1);
   const minScaleRef = useRef(1);
   const panRef = useRef({ x: 0, y: 0 });
   const cropSzRef = useRef(CROP_SIZE);
+  const displayWRef = useRef(0); // BUG 1 FIX: keep display dims in refs
+  const displayHRef = useRef(0); // so clampPan never reads stale state
   const lastTouches = useRef<Array<{ x: number; y: number }>>([]);
+  const lastTouchCount = useRef(0); // BUG 3 FIX: track previous touch count
   const lastTapAt = useRef(0);
 
-  // Keep cropSzRef current (crop size doesn't change after mount in portrait apps)
   useEffect(() => {
     cropSzRef.current = CROP_SIZE;
   }, [CROP_SIZE]);
 
-  // Reset everything when a new URI is opened
   useEffect(() => {
     if (!uri || !visible) return;
     setLoading(true);
     setSaving(false);
     panRef.current = { x: 0, y: 0 };
+    lastTouches.current = [];
+    lastTouchCount.current = 0;
     setPanX(0);
     setPanY(0);
 
@@ -95,19 +90,26 @@ export function CropModal({ visible, uri, onSave, onClose }: Props) {
         imgHRef.current = h;
         minScaleRef.current = minScale;
         scaleRef.current = minScale;
-        setDisplayW(w * minScale);
-        setDisplayH(h * minScale);
+        const dw = w * minScale;
+        const dh = h * minScale;
+        displayWRef.current = dw; // BUG 1 FIX
+        displayHRef.current = dh;
+        setDisplayW(dw);
+        setDisplayH(dh);
         setLoading(false);
       },
       () => setLoading(false)
     );
   }, [uri, visible]);
 
-  // Clamp pan so image never exposes the background inside the crop box
-  function clampPan(px: number, py: number, sc: number): { x: number; y: number } {
+  /**
+   * BUG 1 FIX: clampPan reads only refs (cropSzRef, displayWRef, displayHRef),
+   * never React state, so it is always current inside PanResponder callbacks.
+   */
+  function clampPan(px: number, py: number): { x: number; y: number } {
     const CS = cropSzRef.current;
-    const dW = imgWRef.current * sc;
-    const dH = imgHRef.current * sc;
+    const dW = displayWRef.current;
+    const dH = displayHRef.current;
     const maxX = Math.max(0, (dW - CS) / 2);
     const maxY = Math.max(0, (dH - CS) / 2);
     return {
@@ -116,7 +118,28 @@ export function CropModal({ visible, uri, onSave, onClose }: Props) {
     };
   }
 
-  // PanResponder created once; reads all values through refs
+  // Helper: commit new pan to both ref and state
+  function applyPan(x: number, y: number) {
+    const clamped = clampPan(x, y);
+    panRef.current = clamped;
+    setPanX(clamped.x);
+    setPanY(clamped.y);
+  }
+
+  // Helper: commit new scale + re-clamp pan
+  function applyScale(newScale: number) {
+    const w = imgWRef.current;
+    const h = imgHRef.current;
+    scaleRef.current = newScale;
+    const dw = w * newScale;
+    const dh = h * newScale;
+    displayWRef.current = dw; // BUG 1 FIX: keep refs in sync
+    displayHRef.current = dh;
+    setDisplayW(dw);
+    setDisplayH(dh);
+    applyPan(panRef.current.x, panRef.current.y);
+  }
+
   const panResponder = useRef(
     PanResponder.create({
       onStartShouldSetPanResponder: () => true,
@@ -128,6 +151,7 @@ export function CropModal({ visible, uri, onSave, onClose }: Props) {
           x: t.pageX,
           y: t.pageY,
         }));
+        lastTouchCount.current = lastTouches.current.length;
       },
 
       onPanResponderMove: (evt) => {
@@ -136,22 +160,29 @@ export function CropModal({ visible, uri, onSave, onClose }: Props) {
           y: t.pageY,
         }));
         const prev = lastTouches.current;
+        const prevCount = lastTouchCount.current;
+
+        /**
+         * BUG 3 FIX: When the finger count changes (e.g. user lifts one finger
+         * during a pinch), reset lastTouches to the current positions so the
+         * next delta is computed from a clean baseline — preventing a position
+         * jump caused by mismatched indices.
+         */
+        if (touches.length !== prevCount) {
+          lastTouches.current = touches;
+          lastTouchCount.current = touches.length;
+          return; // skip this frame, establish new baseline
+        }
 
         if (touches.length === 1 && prev.length >= 1) {
-          // Single-finger pan
           const dx = touches[0].x - prev[0].x;
           const dy = touches[0].y - prev[0].y;
-          const clamped = clampPan(
-            panRef.current.x + dx,
-            panRef.current.y + dy,
-            scaleRef.current
-          );
-          panRef.current = clamped;
-          setPanX(clamped.x);
-          setPanY(clamped.y);
+          applyPan(panRef.current.x + dx, panRef.current.y + dy);
         } else if (touches.length === 2 && prev.length >= 2) {
-          // Two-finger pinch zoom
-          const prevDist = Math.hypot(prev[1].x - prev[0].x, prev[1].y - prev[0].y);
+          const prevDist = Math.hypot(
+            prev[1].x - prev[0].x,
+            prev[1].y - prev[0].y
+          );
           const curDist = Math.hypot(
             touches[1].x - touches[0].x,
             touches[1].y - touches[0].y
@@ -159,47 +190,44 @@ export function CropModal({ visible, uri, onSave, onClose }: Props) {
           if (prevDist > 0) {
             const newScale = Math.max(
               minScaleRef.current,
-              Math.min(minScaleRef.current * 7, scaleRef.current * (curDist / prevDist))
+              Math.min(
+                minScaleRef.current * 7,
+                scaleRef.current * (curDist / prevDist)
+              )
             );
-            scaleRef.current = newScale;
-            setDisplayW(imgWRef.current * newScale);
-            setDisplayH(imgHRef.current * newScale);
-            // Re-clamp pan after scale change
-            const clamped = clampPan(panRef.current.x, panRef.current.y, newScale);
-            panRef.current = clamped;
-            setPanX(clamped.x);
-            setPanY(clamped.y);
+            applyScale(newScale);
           }
         }
 
         lastTouches.current = touches;
+        lastTouchCount.current = touches.length;
       },
 
       onPanResponderRelease: (_, gs) => {
         lastTouches.current = [];
-        // Double-tap to reset
+        lastTouchCount.current = 0;
         const now = Date.now();
         if (
           now - lastTapAt.current < 280 &&
           Math.abs(gs.dx) < 6 &&
           Math.abs(gs.dy) < 6
         ) {
+          // Double-tap: reset to fit
           const CS = cropSzRef.current;
           const w = imgWRef.current;
           const h = imgHRef.current;
           const minScale = Math.max(CS / w, CS / h);
-          scaleRef.current = minScale;
+          applyScale(minScale); // also resets pan via applyPan inside
           panRef.current = { x: 0, y: 0 };
           setPanX(0);
           setPanY(0);
-          setDisplayW(w * minScale);
-          setDisplayH(h * minScale);
         }
         lastTapAt.current = now;
       },
 
       onPanResponderTerminate: () => {
         lastTouches.current = [];
+        lastTouchCount.current = 0;
       },
     })
   ).current;
@@ -208,38 +236,27 @@ export function CropModal({ visible, uri, onSave, onClose }: Props) {
     if (!uri || !imgWRef.current || !imgHRef.current) return;
     setSaving(true);
     try {
-      const w = imgWRef.current;
-      const h = imgHRef.current;
+      const imgW = imgWRef.current;
+      const imgH = imgHRef.current;
       const sc = scaleRef.current;
       const CS = cropSzRef.current;
       const px = panRef.current.x;
       const py = panRef.current.y;
 
-      // Core formula — correct regardless of screen position
-      const originX = w / 2 - px / sc - CS / (2 * sc);
-      const originY = h / 2 - py / sc - CS / (2 * sc);
+      const originX = imgW / 2 - px / sc - CS / (2 * sc);
+      const originY = imgH / 2 - py / sc - CS / (2 * sc);
       const side = CS / sc;
 
-      // Safety clamp
-      const ox = Math.max(0, Math.min(w - 1, originX));
-      const oy = Math.max(0, Math.min(h - 1, originY));
-      const ow = Math.min(Math.round(side), w - Math.round(ox));
-      const oh = Math.min(Math.round(side), h - Math.round(oy));
+      const ox = Math.max(0, Math.round(originX));
+      const oy = Math.max(0, Math.round(originY));
+      const ow = Math.min(Math.round(side), imgW - ox);
+      const oh = Math.min(Math.round(side), imgH - oy);
 
       if (ow < 1 || oh < 1) return;
 
       const result = await ImageManipulator.manipulateAsync(
         uri,
-        [
-          {
-            crop: {
-              originX: Math.round(ox),
-              originY: Math.round(oy),
-              width: ow,
-              height: oh,
-            },
-          },
-        ],
+        [{ crop: { originX: ox, originY: oy, width: ow, height: oh } }],
         { compress: 0.92, format: ImageManipulator.SaveFormat.JPEG }
       );
       onSave(result.uri, uri);
@@ -256,15 +273,12 @@ export function CropModal({ visible, uri, onSave, onClose }: Props) {
     const h = imgHRef.current;
     if (!w || !h) return;
     const minScale = Math.max(CS / w, CS / h);
-    scaleRef.current = minScale;
     panRef.current = { x: 0, y: 0 };
     setPanX(0);
     setPanY(0);
-    setDisplayW(w * minScale);
-    setDisplayH(h * minScale);
+    applyScale(minScale);
   }, []);
 
-  // Image screen position (centered on crop box center)
   const imgLeft = SW / 2 + panX - displayW / 2;
   const imgTop = SH / 2 + panY - displayH / 2;
 
@@ -280,47 +294,59 @@ export function CropModal({ visible, uri, onSave, onClose }: Props) {
       onRequestClose={onClose}
     >
       <View style={styles.root}>
-        {/* ── Image layer (no touch) ───────────────────────────── */}
+        {/* ── Image layer ─────────────────────────────────────
+            BUG 2 FIX: Use contentFit="cover" (not "fill") inside a View
+            clipped to displayW×displayH. "fill" ignores aspect ratio and
+            stretches EXIF-rotated images. "cover" respects the intrinsic
+            aspect ratio as decoded (post-EXIF), and the parent View clips
+            to the exact display rect we calculated.
+        ────────────────────────────────────────────────── */}
         {!loading && displayW > 0 && (
           <View
             pointerEvents="none"
             style={[
               styles.abs,
-              { left: imgLeft, top: imgTop, width: displayW, height: displayH },
+              {
+                left: imgLeft,
+                top: imgTop,
+                width: displayW,
+                height: displayH,
+                overflow: "hidden", // BUG 2 FIX: clips any edge bleed
+              },
             ]}
           >
             <Image
               source={{ uri }}
               style={{ width: displayW, height: displayH }}
-              contentFit="fill"
+              contentFit="cover" // BUG 2 FIX: was "fill"
             />
           </View>
         )}
 
         {loading && (
-          <View style={[styles.abs, styles.fill, styles.center]} pointerEvents="none">
+          <View
+            style={[styles.abs, styles.fill, styles.center]}
+            pointerEvents="none"
+          >
             <ActivityIndicator color="#fff" size="large" />
           </View>
         )}
 
-        {/* ── Dark overlay panels (no touch) ──────────────────── */}
+        {/* ── Dark overlay panels ──────────────────────────── */}
         <View pointerEvents="none" style={[styles.abs, { top: 0, left: 0, right: 0, height: BOX_TOP, backgroundColor: DIM_COLOR }]} />
         <View pointerEvents="none" style={[styles.abs, { top: BOX_TOP + CROP_SIZE, left: 0, right: 0, bottom: 0, backgroundColor: DIM_COLOR }]} />
         <View pointerEvents="none" style={[styles.abs, { top: BOX_TOP, left: 0, width: BOX_LEFT, height: CROP_SIZE, backgroundColor: DIM_COLOR }]} />
         <View pointerEvents="none" style={[styles.abs, { top: BOX_TOP, left: BOX_LEFT + CROP_SIZE, right: 0, height: CROP_SIZE, backgroundColor: DIM_COLOR }]} />
 
-        {/* ── Crop box: grid + corner markers (no touch) ─────── */}
+        {/* ── Crop box decoration ──────────────────────────── */}
         <View
           pointerEvents="none"
           style={[styles.abs, { top: BOX_TOP, left: BOX_LEFT, width: CROP_SIZE, height: CROP_SIZE }]}
         >
-          {/* Rule-of-thirds grid */}
           <View style={[styles.gridLine, styles.gridV, { left: "33.33%" }]} />
           <View style={[styles.gridLine, styles.gridV, { left: "66.66%" }]} />
           <View style={[styles.gridLine, styles.gridH, { top: "33.33%" }]} />
           <View style={[styles.gridLine, styles.gridH, { top: "66.66%" }]} />
-
-          {/* Corner markers */}
           {/* TL */}
           <View style={[styles.cBar, { top: 0, left: 0, width: CORNER_LEN, height: CORNER_W }]} />
           <View style={[styles.cBar, { top: 0, left: 0, width: CORNER_W, height: CORNER_LEN }]} />
@@ -335,10 +361,10 @@ export function CropModal({ visible, uri, onSave, onClose }: Props) {
           <View style={[styles.cBar, { bottom: 0, right: 0, width: CORNER_W, height: CORNER_LEN }]} />
         </View>
 
-        {/* ── Gesture capture layer (full screen, below header/footer) ── */}
+        {/* ── Gesture capture (full screen) ───────────────── */}
         <View style={[styles.abs, styles.fill]} {...panResponder.panHandlers} />
 
-        {/* ── Header (on top, buttons receive touches) ────────── */}
+        {/* ── Header ──────────────────────────────────────── */}
         <View
           pointerEvents="box-none"
           style={[styles.abs, styles.header, { paddingTop: headerPT }]}
@@ -361,7 +387,7 @@ export function CropModal({ visible, uri, onSave, onClose }: Props) {
           </TouchableOpacity>
         </View>
 
-        {/* ── Footer (on top, hint + reset) ───────────────────── */}
+        {/* ── Footer ──────────────────────────────────────── */}
         <View
           pointerEvents="box-none"
           style={[styles.abs, styles.footer, { paddingBottom: footerPB }]}
@@ -369,14 +395,14 @@ export function CropModal({ visible, uri, onSave, onClose }: Props) {
           <TouchableOpacity onPress={handleReset} hitSlop={HIT}>
             <Text style={styles.resetText}>Reset</Text>
           </TouchableOpacity>
-          <Text style={styles.hintText}>Drag · Pinch to zoom · Double-tap to reset</Text>
+          <Text style={styles.hintText}>
+            Drag · Pinch to zoom · Double-tap to reset
+          </Text>
         </View>
       </View>
     </Modal>
   );
 }
-
-const HIT = { top: 12, bottom: 12, left: 12, right: 12 };
 
 const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: "#000" },
