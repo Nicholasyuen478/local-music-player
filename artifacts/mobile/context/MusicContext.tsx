@@ -132,9 +132,10 @@ const [MusicContextProvider, useMusicContext] = createContextHook(() => {
   // Background audio + lock screen controls
   useEffect(() => {
     setAudioModeAsync({
-      playsInSilentMode: true,
-      shouldPlayInBackground: true,
-      interruptionMode: "duckOthers",
+      playsInSilentMode: true,         // iOS: play through silent switch
+      shouldPlayInBackground: true,    // Android: keep playing when screen locks
+      interruptionMode: "doNotMix",    // pause/stop others instead of ducking
+      staysActiveInBackground: true,   // iOS: keep audio session alive in background
     });
   }, []);
 
