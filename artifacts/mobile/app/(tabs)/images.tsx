@@ -27,7 +27,6 @@ export default function ImagesScreen() {
     addImagesToPool,
     removeImageFromPool,
     cropImageInPool,
-    pickImageFolder,
   } = useMusicContext();
 
   const [isAdding, setIsAdding] = useState(false);
@@ -36,7 +35,7 @@ export default function ImagesScreen() {
   const topInset = Platform.OS === "web" ? 48 : insets.top;
   const bottomInset = Platform.OS === "web" ? 90 : insets.bottom;
 
-  // Multi-select from gallery (no crop)
+  // Pick multiple images from gallery
   const handlePickFiles = async () => {
     setIsAdding(true);
     try {
@@ -60,28 +59,6 @@ export default function ImagesScreen() {
     }
   };
 
-  // Pick single image with native crop (square, no custom UI needed)
-  const handlePickWithCrop = async () => {
-    try {
-      const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
-      if (status !== "granted") return;
-      const result = await ImagePicker.launchImageLibraryAsync({
-        mediaTypes: ["images"],
-        allowsMultipleSelection: false,
-        allowsEditing: true,
-        aspect: [1, 1],
-        quality: 1,
-        exif: false,
-      });
-      if (!result.canceled && result.assets.length > 0) {
-        await addImagesToPool([result.assets[0].uri]);
-        Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-      }
-    } catch (e) {
-      console.error("pick with crop error", e);
-    }
-  };
-
   const handleRemove = (uri: string) => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
     Alert.alert("Remove image?", undefined, [
@@ -95,6 +72,7 @@ export default function ImagesScreen() {
   };
 
   const handleOpenCrop = useCallback((uri: string) => {
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     setCropUri(uri);
   }, []);
 
@@ -113,30 +91,21 @@ export default function ImagesScreen() {
         <Text style={styles.headerCount}>
           {imagePool.length > 0 ? `${imagePool.length} images` : ""}
         </Text>
-        <View style={styles.headerActions}>
-          {/* Pick with native crop (single image) */}
-          <TouchableOpacity style={styles.headerBtn} onPress={handlePickWithCrop} activeOpacity={0.6}>
-            <Crop size={19} color={Colors.dark.textTertiary} />
-          </TouchableOpacity>
-          {/* Pick multiple without crop */}
-          <TouchableOpacity
-            style={[styles.headerBtn, isAdding && { opacity: 0.4 }]}
-            onPress={handlePickFiles}
-            activeOpacity={0.6}
-            disabled={isAdding}
-          >
-            <Plus size={20} color={Colors.dark.textTertiary} />
-          </TouchableOpacity>
-        </View>
+        <TouchableOpacity
+          style={[styles.addBtn, isAdding && { opacity: 0.4 }]}
+          onPress={handlePickFiles}
+          activeOpacity={0.6}
+          disabled={isAdding}
+        >
+          <Plus size={20} color={Colors.dark.textTertiary} />
+        </TouchableOpacity>
       </View>
 
       {imagePool.length === 0 ? (
         <View style={styles.emptyState}>
           <ImageIcon size={36} color={Colors.dark.textTertiary} />
           <Text style={styles.emptyText}>No images</Text>
-          <Text style={styles.emptyHint}>
-            Tap + to add artwork images
-          </Text>
+          <Text style={styles.emptyHint}>Tap + to add artwork images</Text>
         </View>
       ) : (
         <FlatList
@@ -162,7 +131,7 @@ export default function ImagesScreen() {
               <TouchableOpacity
                 style={[styles.overlayBtn, styles.cropBtn]}
                 onPress={() => handleOpenCrop(item)}
-                hitSlop={{ top: 4, bottom: 4, left: 4, right: 4 }}
+                hitSlop={{ top: 6, bottom: 6, left: 6, right: 6 }}
               >
                 <View style={styles.overlayBtnInner}>
                   <Crop size={10} color="#fff" />
@@ -172,7 +141,7 @@ export default function ImagesScreen() {
               <TouchableOpacity
                 style={[styles.overlayBtn, styles.removeBtn]}
                 onPress={() => handleRemove(item)}
-                hitSlop={{ top: 4, bottom: 4, left: 4, right: 4 }}
+                hitSlop={{ top: 6, bottom: 6, left: 6, right: 6 }}
               >
                 <View style={styles.overlayBtnInner}>
                   <X size={10} color="#fff" />
@@ -210,12 +179,7 @@ const styles = StyleSheet.create({
     letterSpacing: 0.5,
     textTransform: "uppercase",
   },
-  headerActions: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 4,
-  },
-  headerBtn: {
+  addBtn: {
     width: 36,
     height: 36,
     alignItems: "center",
