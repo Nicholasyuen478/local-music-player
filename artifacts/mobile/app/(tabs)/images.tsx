@@ -35,7 +35,6 @@ export default function ImagesScreen() {
   const topInset = Platform.OS === "web" ? 48 : insets.top;
   const bottomInset = Platform.OS === "web" ? 90 : insets.bottom;
 
-  // Pick multiple images from gallery
   const handlePickFiles = async () => {
     setIsAdding(true);
     try {
@@ -153,7 +152,7 @@ export default function ImagesScreen() {
       )}
 
       <CropModal
-        visible={!!cropUri}
+        visible={cropUri !== null}
         uri={cropUri}
         onSave={handleCropSave}
         onClose={() => setCropUri(null)}

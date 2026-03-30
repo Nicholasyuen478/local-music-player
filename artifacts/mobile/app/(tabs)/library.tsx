@@ -80,6 +80,16 @@ export default function LibraryScreen() {
     );
   }, [selectedIds, removeSongs, exitSelectMode]);
 
+  // ✅ Scroll to current song after the list is measured
+  const handleListLayout = useCallback(() => {
+    if (currentIndex > 0 && listRef.current) {
+      listRef.current.scrollToIndex({
+        index: Math.max(0, currentIndex - 2),
+        animated: false,
+      });
+    }
+  }, [currentIndex]);
+
   const renderItem = useCallback(
     ({ item, index }: { item: Song; index: number }) => {
       const isActive = item.id === currentSong?.id;
@@ -148,14 +158,26 @@ export default function LibraryScreen() {
           data={queue}
           keyExtractor={(item) => item.id}
           renderItem={renderItem}
-          contentContainerStyle={{ paddingBottom: (selectMode ? 80 : 0) + bottomInset + 16 }}
+          contentContainerStyle={{
+            paddingBottom: (selectMode ? 80 : 0) + bottomInset + 16,
+          }}
           showsVerticalScrollIndicator={false}
-          initialScrollIndex={currentIndex > 2 ? Math.max(0, currentIndex - 2) : 0}
+          // ✅ Removed unreliable initialScrollIndex
           getItemLayout={(_, index) => ({
             length: ITEM_HEIGHT,
             offset: ITEM_HEIGHT * index,
             index,
           })}
+          onLayout={handleListLayout}
+          onScrollToIndexFailed={({ index }) => {
+            // Safety fallback: retry after native list settles
+            setTimeout(() => {
+              listRef.current?.scrollToIndex({
+                index: Math.max(0, index - 2),
+                animated: false,
+              });
+            }, 100);
+          }}
         />
       )}
 
@@ -163,7 +185,10 @@ export default function LibraryScreen() {
       {selectMode && (
         <View style={[styles.actionBar, { paddingBottom: bottomInset + 8 }]}>
           <TouchableOpacity
-            style={[styles.removeBtn, selectedIds.size === 0 && styles.removeBtnDisabled]}
+            style={[
+              styles.removeBtn,
+              selectedIds.size === 0 && styles.removeBtnDisabled,
+            ]}
             onPress={handleRemove}
             disabled={selectedIds.size === 0}
             activeOpacity={0.7}

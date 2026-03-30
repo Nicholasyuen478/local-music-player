@@ -33,6 +33,7 @@ export default function PlayerScreen() {
   const insets = useSafeAreaInsets();
   const { width } = useWindowDimensions();
   const [isScanning, setIsScanning] = useState(false);
+  const hasAutoPlayed = useRef(false);
 
   const {
     currentSong,
@@ -54,40 +55,41 @@ export default function PlayerScreen() {
     seekTo,
   } = useMusicContext();
 
-  const handleClearAll = useCallback(() => {
-    Alert.alert(
-      "Clear library",
-      "Remove all songs and return to setup?",
-      [
-        { text: "Cancel", style: "cancel" },
-        {
-          text: "Clear",
-          style: "destructive",
-          onPress: () => {
-            Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning);
-            resetSetup();
-          },
-        },
-      ]
-    );
-  }, [resetSetup]);
-
+  // ── Derived values (no hooks, safe anywhere) ─────────────────────────
   const artSize = Math.min(width - 48, 340);
   const topInset = Platform.OS === "web" ? 48 : insets.top;
   const bottomInset = Platform.OS === "web" ? 90 : insets.bottom;
 
-  // ── Swipe gesture on artwork ──────────────────────────────────────────
+  // ── Animated values ───────────────────────────────────────────────────
   const slideX = useRef(new Animated.Value(0)).current;
   const slideOpacity = useRef(new Animated.Value(1)).current;
 
+  // ── Stable refs for PanResponder callbacks ────────────────────────────
   const playNextRef = useRef(playNext);
   const playPrevRef = useRef(playPrev);
+
+  // ✅ HOOK — must be above early return
   useEffect(() => {
     playNextRef.current = playNext;
     playPrevRef.current = playPrev;
   }, [playNext, playPrev]);
 
-  function animateSongChange(direction: "left" | "right", onComplete: () => void) {
+  // ✅ HOOK — auto-play on first load (moved above early return)
+  useEffect(() => {
+    if (!isSetupDone || !currentSong || hasAutoPlayed.current) return;
+    if (status.playing) {
+      hasAutoPlayed.current = true;
+      return;
+    }
+    hasAutoPlayed.current = true;
+    togglePlayPause();
+  }, [isSetupDone, currentSong]); // togglePlayPause intentionally omitted
+
+  // ── Helpers (not hooks) ───────────────────────────────────────────────
+  function animateSongChange(
+    direction: "left" | "right",
+    onComplete: () => void,
+  ) {
     Animated.parallel([
       Animated.timing(slideX, {
         toValue: direction === "left" ? -width : width,
@@ -119,6 +121,7 @@ export default function PlayerScreen() {
     });
   }
 
+  // ── PanResponder (useRef is a hook — already at top level via .current) ──
   const panResponder = useRef(
     PanResponder.create({
       onMoveShouldSetPanResponder: (_, { dx, dy }) =>
@@ -134,16 +137,33 @@ export default function PlayerScreen() {
           Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
           animateSongChange("left", () => playNextRef.current());
         } else {
-          Animated.spring(slideX, { toValue: 0, useNativeDriver: true }).start();
+          Animated.spring(slideX, {
+            toValue: 0,
+            useNativeDriver: true,
+          }).start();
         }
       },
       onPanResponderTerminate: () => {
         Animated.spring(slideX, { toValue: 0, useNativeDriver: true }).start();
       },
-    })
+    }),
   ).current;
 
-  // ── Scan handler ────────────────────────────────────────────────────────
+  // ── Callbacks ─────────────────────────────────────────────────────────
+  const handleClearAll = useCallback(() => {
+    Alert.alert("Clear library", "Remove all songs and return to setup?", [
+      { text: "Cancel", style: "cancel" },
+      {
+        text: "Clear",
+        style: "destructive",
+        onPress: () => {
+          Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning);
+          resetSetup();
+        },
+      },
+    ]);
+  }, [resetSetup]);
+
   const handleScan = useCallback(async () => {
     setIsScanning(true);
     try {
@@ -154,8 +174,13 @@ export default function PlayerScreen() {
           "Pick images from your gallery to use as song artwork?",
           [
             { text: "Skip", style: "cancel" },
-            { text: "Choose images", onPress: async () => { await pickImageFolder(); } },
-          ]
+            {
+              text: "Choose images",
+              onPress: async () => {
+                await pickImageFolder();
+              },
+            },
+          ],
         );
       }
     } catch (e) {
@@ -186,21 +211,22 @@ export default function PlayerScreen() {
     toggleShuffle();
   }, [toggleShuffle]);
 
+  // ✅ Early return AFTER all hooks
   if (!isSetupDone) {
     return (
-      <SetupScreen
-        onScan={handleScan}
-        isLoading={isScanning || isLoading}
-      />
+      <SetupScreen onScan={handleScan} isLoading={isScanning || isLoading} />
     );
   }
 
   return (
     <View style={[styles.container, { paddingTop: topInset }]}>
-
       {/* Top utility bar */}
       <View style={styles.topBar}>
-        <TouchableOpacity onPress={handleClearAll} style={styles.iconBtn} activeOpacity={0.6}>
+        <TouchableOpacity
+          onPress={handleClearAll}
+          style={styles.iconBtn}
+          activeOpacity={0.6}
+        >
           <Trash2 size={18} color={Colors.dark.textTertiary} />
         </TouchableOpacity>
         <TouchableOpacity
@@ -209,7 +235,10 @@ export default function PlayerScreen() {
           activeOpacity={0.6}
           disabled={isScanning}
         >
-          <ScanSearch size={18} color={isScanning ? Colors.dark.accent : Colors.dark.textTertiary} />
+          <ScanSearch
+            size={18}
+            color={isScanning ? Colors.dark.accent : Colors.dark.textTertiary}
+          />
         </TouchableOpacity>
       </View>
 
@@ -242,13 +271,20 @@ export default function PlayerScreen() {
             {currentSong?.title ?? (songs.length > 0 ? "—" : "No songs")}
           </Text>
           <Text style={styles.songArtist} numberOfLines={1}>
-            {currentSong?.artist ?? (songs.length > 0 ? `${songs.length} songs` : "")}
+            {currentSong?.artist ??
+              (songs.length > 0 ? `${songs.length} songs` : "")}
           </Text>
         </View>
-        <TouchableOpacity onPress={handleShuffle} style={styles.shuffleBtn} activeOpacity={0.7}>
+        <TouchableOpacity
+          onPress={handleShuffle}
+          style={styles.shuffleBtn}
+          activeOpacity={0.7}
+        >
           <Shuffle
             size={20}
-            color={shuffleEnabled ? Colors.dark.accent : Colors.dark.textTertiary}
+            color={
+              shuffleEnabled ? Colors.dark.accent : Colors.dark.textTertiary
+            }
           />
         </TouchableOpacity>
       </View>
@@ -264,19 +300,49 @@ export default function PlayerScreen() {
 
       {/* Controls */}
       <View style={[styles.controls, { paddingBottom: bottomInset + 80 }]}>
-        <TouchableOpacity onPress={handlePrev} style={styles.controlBtn} activeOpacity={0.7}>
-          <SkipBack size={28} color={Colors.dark.text} fill={Colors.dark.text} />
+        <TouchableOpacity
+          onPress={handlePrev}
+          style={styles.controlBtn}
+          activeOpacity={0.7}
+        >
+          <SkipBack
+            size={28}
+            color={Colors.dark.text}
+            fill={Colors.dark.text}
+          />
         </TouchableOpacity>
 
-        <TouchableOpacity onPress={handlePlayPause} activeOpacity={0.85} style={styles.playBtn}>
-          {status.playing
-            ? <Pause size={32} color={Colors.dark.background} fill={Colors.dark.background} />
-            : <Play size={32} color={Colors.dark.background} fill={Colors.dark.background} style={{ marginLeft: 3 }} />
-          }
+        <TouchableOpacity
+          onPress={handlePlayPause}
+          activeOpacity={0.85}
+          style={styles.playBtn}
+        >
+          {status.playing ? (
+            <Pause
+              size={32}
+              color={Colors.dark.background}
+              fill={Colors.dark.background}
+            />
+          ) : (
+            <Play
+              size={32}
+              color={Colors.dark.background}
+              fill={Colors.dark.background}
+              style={{ marginLeft: 3 }}
+            />
+          )}
         </TouchableOpacity>
 
-        <TouchableOpacity onPress={handleNext} style={styles.controlBtn} activeOpacity={0.7}>
-          <SkipForward size={28} color={Colors.dark.text} fill={Colors.dark.text} />
+        <TouchableOpacity
+          onPress={handleNext}
+          style={styles.controlBtn}
+          activeOpacity={0.7}
+        >
+          <SkipForward
+            size={28}
+            color={Colors.dark.text}
+            fill={Colors.dark.text}
+          />
         </TouchableOpacity>
       </View>
     </View>
