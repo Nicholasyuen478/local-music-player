@@ -385,6 +385,16 @@ const [MusicContextProvider, useMusicContext] = createContextHook(() => {
     }
   }, [addImagesToPool]);
 
+  // Replace an existing pool image URI with a new (cropped) one
+  const cropImageInPool = useCallback(
+    async (oldUri: string, newUri: string) => {
+      const next = imagePool.map((u) => (u === oldUri ? newUri : u));
+      setImagePool(next);
+      await AsyncStorage.setItem(STORAGE_KEYS.IMAGE_POOL, JSON.stringify(next));
+    },
+    [imagePool]
+  );
+
   const seekTo = useCallback((secs: number) => { player.seekTo(secs); }, [player]);
 
   return {
@@ -411,6 +421,7 @@ const [MusicContextProvider, useMusicContext] = createContextHook(() => {
     addImagesToPool,
     removeImageFromPool,
     pickImageFolder,
+    cropImageInPool,
     seekTo,
   };
 });
