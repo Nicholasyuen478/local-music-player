@@ -84,3 +84,4 @@ This repo does not include dedicated unit tests in the current state. Add your o
 ## Contact
 
 For questions, use repository issues or reach the maintainer.
+# local-music-player
