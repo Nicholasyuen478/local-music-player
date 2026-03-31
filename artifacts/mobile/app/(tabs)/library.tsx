@@ -11,6 +11,7 @@ import {
   View,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { useFocusEffect } from "expo-router"; //
 import Colors from "@/constants/colors";
 import { useMusicContext } from "@/context/MusicContext";
 import type { Song } from "@/context/MusicContext";
@@ -29,6 +30,7 @@ export default function LibraryScreen() {
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [selectMode, setSelectMode] = useState(false);
   const listRef = useRef<FlatList>(null);
+  const isListReady = useRef(false); // 
 
   const topInset = Platform.OS === "web" ? 48 : insets.top;
   const bottomInset = Platform.OS === "web" ? 90 : insets.bottom;
@@ -80,15 +82,32 @@ export default function LibraryScreen() {
     );
   }, [selectedIds, removeSongs, exitSelectMode]);
 
-  // ✅ Scroll to current song after the list is measured
-  const handleListLayout = useCallback(() => {
-    if (currentIndex > 0 && listRef.current) {
+  // ✅ Helper function to scroll to current
+  const scrollToCurrent = useCallback(() => {
+    if (currentIndex > 0 && listRef.current && isListReady.current) {
       listRef.current.scrollToIndex({
         index: Math.max(0, currentIndex - 2),
-        animated: false,
+        animated: true, // Optional: true makes it feel nicer when switching tabs
       });
     }
   }, [currentIndex]);
+
+  // ✅ 1. Scroll when list first renders (initial mount)
+  const handleListLayout = useCallback(() => {
+    isListReady.current = true;
+    scrollToCurrent();
+  }, [scrollToCurrent]);
+
+  // ✅ 2. Scroll every time user navigates back to this tab
+  useFocusEffect(
+    useCallback(() => {
+      // Small timeout ensures the tab transition finishes before scrolling
+      const timer = setTimeout(() => {
+        scrollToCurrent();
+      }, 100);
+      return () => clearTimeout(timer);
+    }, [scrollToCurrent])
+  );
 
   const renderItem = useCallback(
     ({ item, index }: { item: Song; index: number }) => {
@@ -162,7 +181,6 @@ export default function LibraryScreen() {
             paddingBottom: (selectMode ? 80 : 0) + bottomInset + 16,
           }}
           showsVerticalScrollIndicator={false}
-          // ✅ Removed unreliable initialScrollIndex
           getItemLayout={(_, index) => ({
             length: ITEM_HEIGHT,
             offset: ITEM_HEIGHT * index,
@@ -170,7 +188,6 @@ export default function LibraryScreen() {
           })}
           onLayout={handleListLayout}
           onScrollToIndexFailed={({ index }) => {
-            // Safety fallback: retry after native list settles
             setTimeout(() => {
               listRef.current?.scrollToIndex({
                 index: Math.max(0, index - 2),

@@ -1,6 +1,10 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import createContextHook from "@nkzw/create-context-hook";
-import { useAudioPlayer, useAudioPlayerStatus, setAudioModeAsync } from "expo-audio";
+import {
+  useAudioPlayer,
+  useAudioPlayerStatus,
+  setAudioModeAsync,
+} from "expo-audio";
 import * as ImagePicker from "expo-image-picker";
 import * as MediaLibrary from "expo-media-library";
 import React, { useCallback, useEffect, useRef, useState } from "react";
@@ -25,36 +29,51 @@ const STORAGE_KEYS = {
   SHUFFLE: "shuffle_enabled",
 };
 
-const AUDIO_EXTENSIONS = [".mp3", ".m4a", ".aac", ".ogg", ".flac", ".wav", ".opus", ".wma"];
-const IMAGE_EXTENSIONS = [".jpg", ".jpeg", ".png", ".webp", ".gif", ".avif"];
-
-// Paths that indicate a system sound (ringtone, notification, alarm, etc.)
-const SKIP_PATH_FRAGMENTS = [
-  "/ringtones/",
-  "/ringtone/",
-  "/notifications/",
-  "/notification/",
-  "/alarms/",
-  "/alarm/",
-  "system/media",
-  "system/sounds",
-  "/android/media/",
-  "com.android",
-  "/soundfx/",
-  "/ui/",
+const AUDIO_EXTENSIONS = [
+  ".mp3", ".m4a", ".aac", ".ogg", ".flac", ".wav", ".opus", ".wma",
 ];
 
-// Minimum duration to be considered music (skip short sound effects)
+const SKIP_PATH_FRAGMENTS = [
+  "/ringtones/", "/ringtone/", "/notifications/", "/notification/",
+  "/alarms/", "/alarm/", "system/media", "system/sounds",
+  "/android/media/", "com.android", "/soundfx/", "/ui/",
+];
+
 const MIN_DURATION_SECS = 30;
+
+// ── Filename-based metadata parser ─────────────────────────────────────
+// Priority order:
+//   1. "{title} - {artist}"  (with spaces, primary format)
+//   2. "{title}-{artist}"    (no spaces, split at last hyphen)
+//   3. Entire filename as title, "Unknown Artist" as artist
 
 function parseSongMeta(filename: string, uri: string, duration?: number): Song {
   const nameWithoutExt = filename.replace(/\.[^/.]+$/, "");
-  const parts = nameWithoutExt.split(" - ");
-  const artist = parts.length > 1 ? parts[0].trim() : "Unknown Artist";
-  const title = parts.length > 1 ? parts.slice(1).join(" - ").trim() : nameWithoutExt;
+
+  let title = nameWithoutExt;
+  let artist = "Unknown Artist";
+
+  if (nameWithoutExt.includes(" - ")) {
+    // Strategy 1: "{title} - {artist}" — split by last " - " so titles
+    // containing " - " are preserved correctly (e.g. "Live - Forever - Oasis")
+    const lastSepIndex = nameWithoutExt.lastIndexOf(" - ");
+    title = nameWithoutExt.substring(0, lastSepIndex).trim();
+    artist = nameWithoutExt.substring(lastSepIndex + 3).trim();
+  } else if (nameWithoutExt.includes("-")) {
+    // Strategy 2: "{title}-{artist}" — no spaces around the hyphen
+    const lastDashIndex = nameWithoutExt.lastIndexOf("-");
+    title = nameWithoutExt.substring(0, lastDashIndex).trim();
+    artist = nameWithoutExt.substring(lastDashIndex + 1).trim();
+  }
+
+  // Safety: never return empty strings
+  if (!title) title = nameWithoutExt;
+  if (!artist) artist = "Unknown Artist";
+
   return { id: uri, title, artist, uri, filename, duration };
 }
 
+// ── Audio scanner ───────────────────────────────────────────────────────
 async function scanDeviceAudio(): Promise<Song[]> {
   const { status } = await MediaLibrary.requestPermissionsAsync();
   if (status !== "granted") return [];
@@ -71,14 +90,11 @@ async function scanDeviceAudio(): Promise<Song[]> {
     });
 
     for (const asset of page.assets) {
-      // Skip very short files — sound effects, notifications, UI sounds
       if ((asset.duration ?? 0) < MIN_DURATION_SECS) continue;
 
-      // Skip system/notification/ringtone paths
       const uriLower = asset.uri.toLowerCase();
       if (SKIP_PATH_FRAGMENTS.some((frag) => uriLower.includes(frag))) continue;
 
-      // Skip unsupported extensions
       const fn = asset.filename.toLowerCase();
       if (!AUDIO_EXTENSIONS.some((ext) => fn.endsWith(ext))) continue;
 
@@ -129,13 +145,11 @@ const [MusicContextProvider, useMusicContext] = createContextHook(() => {
   const status = useAudioPlayerStatus(player);
   const currentSong = queue[currentIndex] ?? null;
 
-  // Background audio + lock screen controls
   useEffect(() => {
     setAudioModeAsync({
-      playsInSilentMode: true,         // iOS: play through silent switch
-      shouldPlayInBackground: true,    // Android: keep playing when screen locks
-      interruptionMode: "doNotMix",    // pause/stop others instead of ducking
-      staysActiveInBackground: true,   // iOS: keep audio session alive in background
+      playsInSilentMode: true,
+      shouldPlayInBackground: true,
+      interruptionMode: "doNotMix",
     });
   }, []);
 
@@ -146,16 +160,23 @@ const [MusicContextProvider, useMusicContext] = createContextHook(() => {
   async function loadPersistedData() {
     setIsLoading(true);
     try {
-      const [cachedSongs, pool, customFlag, imgFolder, savedQueue, savedIndex, savedShuffle] =
-        await Promise.all([
-          AsyncStorage.getItem(STORAGE_KEYS.SONGS),
-          AsyncStorage.getItem(STORAGE_KEYS.IMAGE_POOL),
-          AsyncStorage.getItem(STORAGE_KEYS.IMAGE_POOL_CUSTOM),
-          AsyncStorage.getItem(STORAGE_KEYS.IMAGE_FOLDER),
-          AsyncStorage.getItem(STORAGE_KEYS.QUEUE),
-          AsyncStorage.getItem(STORAGE_KEYS.CURRENT_INDEX),
-          AsyncStorage.getItem(STORAGE_KEYS.SHUFFLE),
-        ]);
+      const [
+        cachedSongs,
+        pool,
+        customFlag,
+        imgFolder,
+        savedQueue,
+        savedIndex,
+        savedShuffle,
+      ] = await Promise.all([
+        AsyncStorage.getItem(STORAGE_KEYS.SONGS),
+        AsyncStorage.getItem(STORAGE_KEYS.IMAGE_POOL),
+        AsyncStorage.getItem(STORAGE_KEYS.IMAGE_POOL_CUSTOM),
+        AsyncStorage.getItem(STORAGE_KEYS.IMAGE_FOLDER),
+        AsyncStorage.getItem(STORAGE_KEYS.QUEUE),
+        AsyncStorage.getItem(STORAGE_KEYS.CURRENT_INDEX),
+        AsyncStorage.getItem(STORAGE_KEYS.SHUFFLE),
+      ]);
 
       if (imgFolder) setImageFolderUri(imgFolder);
       if (savedShuffle) setShuffleEnabled(savedShuffle === "true");
@@ -188,17 +209,12 @@ const [MusicContextProvider, useMusicContext] = createContextHook(() => {
     }
   }
 
-  // ── Device scan ──────────────────────────────────────────────────────────
-  // Run once on first launch (manual trigger), can be re-triggered manually.
-  // Does NOT run automatically on every restart.
-
   const scanDeviceMusic = useCallback(async (): Promise<boolean> => {
     setIsLoading(true);
     try {
       const found = await scanDeviceAudio();
       if (found.length === 0) return false;
 
-      // Merge with existing songs (add new, keep existing)
       setSongs((prev) => {
         const merged = [...prev];
         for (const s of found) {
@@ -208,8 +224,7 @@ const [MusicContextProvider, useMusicContext] = createContextHook(() => {
         AsyncStorage.setItem(STORAGE_KEYS.SONGS, JSON.stringify(next));
         AsyncStorage.setItem(STORAGE_KEYS.QUEUE, JSON.stringify(next));
         setQueue(next);
-        const newIdx = 0;
-        setCurrentIndex(newIdx);
+        setCurrentIndex(0);
         AsyncStorage.setItem(STORAGE_KEYS.CURRENT_INDEX, "0");
         if (next[0]?.uri) {
           player.replace({ uri: next[0].uri });
@@ -266,7 +281,7 @@ const [MusicContextProvider, useMusicContext] = createContextHook(() => {
         AsyncStorage.setItem(STORAGE_KEYS.CURRENT_INDEX, String(newIdx)),
       ]);
     },
-    [songs, queue, currentIndex, currentSong, player]
+    [songs, queue, currentIndex, currentSong, player],
   );
 
   const resetSetup = useCallback(async () => {
@@ -280,8 +295,6 @@ const [MusicContextProvider, useMusicContext] = createContextHook(() => {
     setQueue([]);
     setCurrentIndex(0);
   }, []);
-
-  // ── Playback ────────────────────────────────────────────────────────────
 
   const playSong = useCallback(
     async (song: Song, newQueue?: Song[], indexInQueue?: number) => {
@@ -301,7 +314,7 @@ const [MusicContextProvider, useMusicContext] = createContextHook(() => {
         console.error("play error", e);
       }
     },
-    [player, queue]
+    [player, queue],
   );
 
   const togglePlayPause = useCallback(() => {
@@ -339,15 +352,15 @@ const [MusicContextProvider, useMusicContext] = createContextHook(() => {
   }, [shuffleEnabled, songs, currentSong]);
 
   const playNextRef = useRef(playNext);
-  useEffect(() => { playNextRef.current = playNext; }, [playNext]);
+  useEffect(() => {
+    playNextRef.current = playNext;
+  }, [playNext]);
 
   useEffect(() => {
     if (status.didJustFinish) {
       playNextRef.current();
     }
   }, [status.didJustFinish]);
-
-  // ── Image pool ──────────────────────────────────────────────────────────
 
   const addImagesToPool = useCallback(
     async (uris: string[], isCustom = true) => {
@@ -359,7 +372,7 @@ const [MusicContextProvider, useMusicContext] = createContextHook(() => {
         await AsyncStorage.setItem(STORAGE_KEYS.IMAGE_POOL_CUSTOM, "true");
       }
     },
-    [imagePool]
+    [imagePool],
   );
 
   const removeImageFromPool = useCallback(
@@ -368,7 +381,7 @@ const [MusicContextProvider, useMusicContext] = createContextHook(() => {
       setImagePool(next);
       await AsyncStorage.setItem(STORAGE_KEYS.IMAGE_POOL, JSON.stringify(next));
     },
-    [imagePool]
+    [imagePool],
   );
 
   const pickImageFolder = useCallback(async () => {
@@ -385,17 +398,21 @@ const [MusicContextProvider, useMusicContext] = createContextHook(() => {
     }
   }, [addImagesToPool]);
 
-  // Replace an existing pool image URI with a new (cropped) one
   const cropImageInPool = useCallback(
     async (oldUri: string, newUri: string) => {
       const next = imagePool.map((u) => (u === oldUri ? newUri : u));
       setImagePool(next);
       await AsyncStorage.setItem(STORAGE_KEYS.IMAGE_POOL, JSON.stringify(next));
     },
-    [imagePool]
+    [imagePool],
   );
 
-  const seekTo = useCallback((secs: number) => { player.seekTo(secs); }, [player]);
+  const seekTo = useCallback(
+    (secs: number) => {
+      player.seekTo(secs);
+    },
+    [player],
+  );
 
   return {
     songs,
