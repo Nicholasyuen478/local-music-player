@@ -1,6 +1,6 @@
 import * as Haptics from "expo-haptics";
 import React, { useCallback } from "react";
-import { Platform, StyleSheet } from "react-native";
+import { Platform, View, StyleSheet } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { ImageEditor } from "expo-dynamic-image-crop-expo54";
 
@@ -13,9 +13,9 @@ type Props = {
 
 export function CropModal({ visible, uri, onSave, onClose }: Props) {
   const insets = useSafeAreaInsets();
-
-  // Push the control bar down enough to clear the status bar / notch
-  const controlBarHeight = 56 + (Platform.OS === "web" ? 48 : insets.top);
+  
+  // Use the exact same padding logic as ImagesScreen
+  const topInset = Platform.OS === "web" ? 48 : insets.top;
 
   const handleComplete = useCallback(
     (data: { uri: string }) => {
@@ -23,7 +23,7 @@ export function CropModal({ visible, uri, onSave, onClose }: Props) {
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
       onSave(data.uri, uri);
     },
-    [uri, onSave],
+    [uri, onSave]
   );
 
   const handleCancel = useCallback(() => {
@@ -31,50 +31,61 @@ export function CropModal({ visible, uri, onSave, onClose }: Props) {
     onClose();
   }, [onClose]);
 
-  if (!uri) return null;
+  if (!uri || !visible) return null;
 
   return (
-    <ImageEditor
-      isVisible={visible}
-      imageUri={uri}
-      onEditingComplete={handleComplete}
-      onEditingCancel={handleCancel}
-      fixedAspectRatio={1}
-      minimumCropDimensions={{ width: 100, height: 100 }}
-      editorOptions={{
-        backgroundColor: "#000",
-        controlBar: {
-          position: "top",
-          backgroundColor: "rgba(0,0,0,0.75)",
-          height: controlBarHeight,
-          cancelButton: {
-            text: "Cancel",
-            color: "#fff",
-            iconName: "x",
+    // We wrap the editor in a View that adds the exact same padding
+    // you use in ImagesScreen, pushing the control bar safely down.
+    <View style={[styles.container, { paddingTop: topInset }]}>
+      <ImageEditor
+        isVisible={visible}
+        imageUri={uri}
+        onEditingComplete={handleComplete}
+        onEditingCancel={handleCancel}
+        fixedAspectRatio={1}
+        minimumCropDimensions={{ width: 100, height: 100 }}
+        editorOptions={{
+          backgroundColor: "#000",
+          controlBar: {
+            position: "top",
+            backgroundColor: "rgba(0,0,0,0.75)",
+            height: 56, // Standard header height, no longer needs manual inset addition
+            cancelButton: {
+              text: "Cancel",
+              color: "#fff",
+              iconName: "x",
+            },
+            saveButton: {
+              text: "Done",
+              color: "#fff",
+              iconName: "check",
+            },
+            backButton: {
+              text: "Back",
+              color: "#fff",
+              iconName: "arrow-left",
+            },
+            cropButton: {
+              text: "Crop",
+              color: "#fff",
+              iconName: "crop",
+            },
           },
-          saveButton: {
-            text: "Done",
+          gridOverlayColor: "rgba(255,255,255,0.22)",
+          overlayCropColor: "rgba(0,0,0,0.62)",
+          coverMarker: {
+            show: true,
             color: "#fff",
-            iconName: "check",
           },
-          backButton: {
-            text: "Back",
-            color: "#fff",
-            iconName: "arrow-left",
-          },
-          cropButton: {
-            text: "Crop",
-            color: "#fff",
-            iconName: "crop",
-          },
-        },
-        gridOverlayColor: "rgba(255,255,255,0.22)",
-        overlayCropColor: "rgba(0,0,0,0.62)",
-        coverMarker: {
-          show: true,
-          color: "#fff",
-        },
-      }}
-    />
+        }}
+      />
+    </View>
   );
 }
+
+const styles = StyleSheet.create({
+  container: {
+    flex: 1,
+    backgroundColor: "#000", // Matches the editor background so the notch area isn't blank
+  },
+});
