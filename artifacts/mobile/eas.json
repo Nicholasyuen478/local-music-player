@@ -1,16 +1,25 @@
 {
   "cli": {
     "version": ">= 12.0.0",
-    "requireCommit": false
+    "requireCommit": false,
+    "promptToConfigurePushNotifications": false
   },
   "build": {
+    "base": {
+      "cache": {
+        "key": "expo52-v1"
+      }
+    },
     "preview": {
+      "extends": "base",
       "distribution": "internal",
       "android": {
-        "buildType": "apk"
+        "buildType": "apk",
+        "gradleCommand": ":app:assembleRelease"
       }
     },
     "production": {
+      "extends": "base",
       "android": {
         "buildType": "app-bundle"
       }
