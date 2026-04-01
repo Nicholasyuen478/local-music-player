@@ -30,13 +30,29 @@ const STORAGE_KEYS = {
 };
 
 const AUDIO_EXTENSIONS = [
-  ".mp3", ".m4a", ".aac", ".ogg", ".flac", ".wav", ".opus", ".wma",
+  ".mp3",
+  ".m4a",
+  ".aac",
+  ".ogg",
+  ".flac",
+  ".wav",
+  ".opus",
+  ".wma",
 ];
 
 const SKIP_PATH_FRAGMENTS = [
-  "/ringtones/", "/ringtone/", "/notifications/", "/notification/",
-  "/alarms/", "/alarm/", "system/media", "system/sounds",
-  "/android/media/", "com.android", "/soundfx/", "/ui/",
+  "/ringtones/",
+  "/ringtone/",
+  "/notifications/",
+  "/notification/",
+  "/alarms/",
+  "/alarm/",
+  "system/media",
+  "system/sounds",
+  "/android/media/",
+  "com.android",
+  "/soundfx/",
+  "/ui/",
 ];
 
 const MIN_DURATION_SECS = 30;

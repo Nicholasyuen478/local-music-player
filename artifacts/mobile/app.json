@@ -1,7 +1,7 @@
 {
   "expo": {
-    "name": "Music Player",
-    "slug": "music-player",
+    "name": "MyMusic",
+    "slug": "my-music-v2",
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
@@ -11,7 +11,7 @@
     "splash": {
       "image": "./assets/images/splash-icon.png",
       "resizeMode": "contain",
-      "backgroundColor": "#000000"
+      "backgroundColor": "#1B2223"
     },
     "ios": {
       "supportsTablet": false,
@@ -90,8 +90,11 @@
       "reactCompiler": true
     },
     "extra": {
+      "router": {
+        "origin": "https://replit.com/"
+      },
       "eas": {
-        "projectId": "b94eacb9-76b6-4724-9eb1-f2da7a6cb132"
+        "projectId": "5977e123-dcbd-4ef8-9767-ea4a54b89ada"
       }
     }
   }
