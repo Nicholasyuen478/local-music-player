@@ -20,23 +20,35 @@ pnpm workspace monorepo using TypeScript. Each package manages its own dependenc
 
 ### `artifacts/mobile` (`@workspace/mobile`)
 
-Expo React Native Android music player app. Features:
-- Background audio with lock screen controls using `expo-audio`
-- Shuffle/queue playback with playlist management
-- Music folder picker (SAF on Android, first launch only, persisted via AsyncStorage)
-- Image pool management (separate Images tab, add via file picker)
-- Random center-cropped song artwork from image pool
-- Bottom tab navigation (Player + Images)
+Expo 52 React Native music player app (Audio Shuffle Manager). Features:
+- Background audio + lock screen controls via **react-native-track-player** (RNTP)
+- Device audio scanning via `expo-media-library`
+- Shuffle/queue playback with full queue management
+- Image pool management (Images tab, add via gallery picker)
+- Custom drag-to-reposition crop modal via `expo-image-manipulator`
+- Random artwork per song from image pool
+- Bottom tab navigation (Player / Library / Images)
 - EAS-buildable APK configuration
 
+**SDK / Compatibility notes:**
+- Expo SDK 52, React 18.3.1, React Native 0.76.9
+- `newArchEnabled: false` (RNTP requires old architecture)
+- `"main": "index.ts"` — custom entry registers RNTP service before expo-router
+- **Node 24 patch**: `expo-modules-core` ships `"main": "src/index.ts"` which Node 24 rejects. `scripts/patch-expo-modules-core.mjs` rewrites it to `./index.js`; runs automatically via root `postinstall`.
+- RNTP config plugin removed from `app.json` (its ESM index crashes Node 24 on expo start); Android permissions and iOS audio background mode are declared directly in `app.json`.
+
 Key files:
-- `context/MusicContext.tsx` — All music state (player, queue, shuffle, image pool)
-- `app/(tabs)/index.tsx` — Main player screen
-- `app/(tabs)/images.tsx` — Image pool management screen
-- `components/SongArtwork.tsx` — Random image assignment per song
-- `components/SeekBar.tsx` — Draggable seek bar
-- `components/SetupScreen.tsx` — First-launch folder picker
-- `components/QueueSheet.tsx` — Queue modal sheet
+- `index.ts` — Entry: registers RNTP PlaybackService, then imports expo-router/entry
+- `service.ts` — RNTP PlaybackService (remote control events)
+- `context/MusicContext.tsx` — All music state (RNTP hooks, queue, shuffle, image pool)
+- `app/(tabs)/index.tsx` — Player screen with swipe gestures + seek bar
+- `app/(tabs)/library.tsx` — Full song list, long-press multi-select delete
+- `app/(tabs)/images.tsx` — Image pool grid, add/remove/crop
+- `components/CropModal.tsx` — Custom PanResponder crop UI + expo-image-manipulator
+- `components/SongArtwork.tsx` — Random image per song
+- `components/SeekBar.tsx` — Draggable seek bar (@react-native-community/slider)
+- `components/SetupScreen.tsx` — First-launch scan screen
+- `constants/defaultArtworks.ts` — Bundled fallback artwork via expo-asset
 
 ## Structure
 

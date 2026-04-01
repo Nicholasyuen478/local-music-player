@@ -52,10 +52,6 @@
       "expo-font",
       "expo-asset",
       [
-        "react-native-track-player",
-        {}
-      ],
-      [
         "expo-document-picker",
         {
           "iCloudContainerEnvironment": "Production"
