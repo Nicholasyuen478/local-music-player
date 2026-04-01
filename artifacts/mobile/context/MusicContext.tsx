@@ -9,10 +9,20 @@ import TrackPlayer, {
   usePlaybackState,
   useProgress,
 } from "react-native-track-player";
+
 import * as ImagePicker from "expo-image-picker";
 import * as MediaLibrary from "expo-media-library";
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import { getDefaultArtworkUris } from "@/constants/defaultArtworks";
+
+export function stableImageIndex(id: string, poolSize: number): number {
+  if (poolSize === 0) return 0;
+  let h = 5381;
+  for (let i = 0; i < id.length; i++) {
+    h = (((h << 5) + h) + id.charCodeAt(i)) & 0x7fffffff;
+  }
+  return h % poolSize;
+}
 
 export type Song = {
   id: string;
@@ -139,13 +149,18 @@ function shuffleArray<T>(arr: T[]): T[] {
   return copy;
 }
 
-function songToTrack(song: Song): Track {
+function songToTrack(song: Song, imagePool?: string[]): Track {
+  const artwork =
+    imagePool && imagePool.length > 0
+      ? imagePool[stableImageIndex(song.id, imagePool.length)]
+      : undefined;
   return {
     id: song.id,
     url: song.uri,
     title: song.title,
     artist: song.artist,
     duration: song.duration,
+    artwork,
   };
 }
 
@@ -156,6 +171,7 @@ async function setupPlayer() {
   try {
     await TrackPlayer.setupPlayer({
       autoHandleInterruptions: true,
+      waitForBuffer: true,
     });
     await TrackPlayer.updateOptions({
       capabilities: [
@@ -164,6 +180,7 @@ async function setupPlayer() {
         Capability.SkipToNext,
         Capability.SkipToPrevious,
         Capability.SeekTo,
+        Capability.Stop,
       ],
       compactCapabilities: [
         Capability.Play,
@@ -177,6 +194,7 @@ async function setupPlayer() {
         Capability.SkipToNext,
         Capability.SkipToPrevious,
       ],
+      progressUpdateEventInterval: 1,
     });
     await TrackPlayer.setRepeatMode(RepeatMode.Queue);
     playerSetup = true;
@@ -200,6 +218,11 @@ const [MusicContextProvider, useMusicContext] = createContextHook(() => {
   const [isSetupDone, setIsSetupDone] = useState(false);
   const [hasCustomImages, setHasCustomImages] = useState(false);
   const [isPlayerReady, setIsPlayerReady] = useState(false);
+
+  const imagePoolRef = useRef<string[]>([]);
+  useEffect(() => {
+    imagePoolRef.current = imagePool;
+  }, [imagePool]);
 
   const playbackState = usePlaybackState();
   const progress = useProgress(250);
@@ -249,9 +272,12 @@ const [MusicContextProvider, useMusicContext] = createContextHook(() => {
       if (customFlag === "true") setHasCustomImages(true);
 
       if (pool) {
-        setImagePool(JSON.parse(pool));
+        const parsed = JSON.parse(pool) as string[];
+        imagePoolRef.current = parsed;
+        setImagePool(parsed);
       } else {
         const defaults = await getDefaultArtworkUris();
+        imagePoolRef.current = defaults;
         setImagePool(defaults);
       }
 
@@ -263,7 +289,7 @@ const [MusicContextProvider, useMusicContext] = createContextHook(() => {
         setQueue(q);
         setCurrentIndex(idx);
 
-        const tracks = q.map(songToTrack);
+        const tracks = q.map((s) => songToTrack(s, imagePoolRef.current));
         await TrackPlayer.setQueue(tracks);
         if (idx > 0 && idx < tracks.length) {
           await TrackPlayer.skip(idx);
@@ -306,7 +332,7 @@ const [MusicContextProvider, useMusicContext] = createContextHook(() => {
 
       await new Promise<void>((resolve) => setTimeout(resolve, 50));
 
-      const tracks = merged.map(songToTrack);
+      const tracks = merged.map((s) => songToTrack(s, imagePoolRef.current));
       await TrackPlayer.setQueue(tracks);
       setQueue(merged);
       setCurrentIndex(0);
@@ -351,7 +377,7 @@ const [MusicContextProvider, useMusicContext] = createContextHook(() => {
         return;
       }
 
-      const tracks = newQueue.map(songToTrack);
+      const tracks = newQueue.map((s) => songToTrack(s, imagePoolRef.current));
       await TrackPlayer.setQueue(tracks);
       if (newIdx > 0 && newIdx < tracks.length) {
         await TrackPlayer.skip(newIdx);
@@ -387,7 +413,7 @@ const [MusicContextProvider, useMusicContext] = createContextHook(() => {
         const resolvedIdx = idx >= 0 ? idx : 0;
 
         if (newQueue) {
-          const tracks = newQueue.map(songToTrack);
+          const tracks = newQueue.map((s) => songToTrack(s, imagePoolRef.current));
           await TrackPlayer.setQueue(tracks);
           setQueue(newQueue);
         }
@@ -446,7 +472,7 @@ const [MusicContextProvider, useMusicContext] = createContextHook(() => {
     const newIdx = newOrder.findIndex((s) => s.id === currentSong?.id);
     const resolvedIdx = newIdx >= 0 ? newIdx : 0;
 
-    const tracks = newOrder.map(songToTrack);
+    const tracks = newOrder.map((s) => songToTrack(s, imagePoolRef.current));
     await TrackPlayer.setQueue(tracks);
     if (resolvedIdx > 0) {
       await TrackPlayer.skip(resolvedIdx);

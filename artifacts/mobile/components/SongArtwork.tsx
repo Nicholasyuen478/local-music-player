@@ -1,7 +1,8 @@
 import { Image } from "expo-image";
-import React, { useEffect, useRef, useState } from "react";
+import React from "react";
 import { StyleSheet, View, ViewStyle } from "react-native";
 import Colors from "@/constants/colors";
+import { stableImageIndex } from "@/context/MusicContext";
 
 type Props = {
   imagePool: string[];
@@ -12,21 +13,10 @@ type Props = {
 };
 
 export function SongArtwork({ imagePool, songId, size, style, borderRadius = 12 }: Props) {
-  const [imageUri, setImageUri] = useState<string | null>(null);
-  const prevSongId = useRef<string | null | undefined>(undefined);
-
-  useEffect(() => {
-    if (imagePool.length === 0) {
-      setImageUri(null);
-      return;
-    }
-    // Pick a new random image whenever the song changes
-    if (prevSongId.current !== songId) {
-      prevSongId.current = songId;
-      const idx = Math.floor(Math.random() * imagePool.length);
-      setImageUri(imagePool[idx]);
-    }
-  }, [songId, imagePool]);
+  const imageUri =
+    imagePool.length > 0 && songId
+      ? imagePool[stableImageIndex(songId, imagePool.length)]
+      : null;
 
   return (
     <View
