@@ -54,12 +54,6 @@
       "expo-asset",
       "./plugins/withRNTrackPlayer",
       [
-        "expo-document-picker",
-        {
-          "iCloudContainerEnvironment": "Production"
-        }
-      ],
-      [
         "expo-image-picker",
         {
           "photosPermission": "Allow $(PRODUCT_NAME) to access your photo library to use images as artwork."
@@ -77,7 +71,11 @@
         "expo-build-properties",
         {
           "android": {
-            "newArchEnabled": false
+            "newArchEnabled": false,
+            "compileSdkVersion": 35,
+            "targetSdkVersion": 35,
+            "minSdkVersion": 24,
+            "kotlinVersion": "1.9.25"
           },
           "ios": {
             "newArchEnabled": false

@@ -32,10 +32,11 @@ Expo 52 React Native music player app (Audio Shuffle Manager). Features:
 
 **SDK / Compatibility notes:**
 - Expo SDK 52, React 18.3.1, React Native 0.76.9
+- RNTP pinned to exactly `4.1.1` (not `^4.1.1` to prevent unwanted drift)
 - `newArchEnabled: false` (RNTP requires old architecture)
 - `"main": "index.ts"` — custom entry registers RNTP service before expo-router
-- **Node 24 patch**: `expo-modules-core` ships `"main": "src/index.ts"` which Node 24 rejects. `scripts/patch-expo-modules-core.mjs` rewrites it to `./index.js`; runs automatically via root `postinstall`.
 - RNTP's npm config plugin (`"react-native-track-player"`) was replaced with a local CJS plugin `./plugins/withRNTrackPlayer.js` — avoids Node 24 ESM crash while still injecting the `MusicService` into `AndroidManifest.xml` and ensuring iOS `UIBackgroundModes: audio` is set.
+- Plugin uses `require.resolve('@expo/config-plugins', { paths: [expoDir] })` to reliably find the package through `expo`'s own dependency tree (works in both local dev and EAS cloud builds).
 - Lock screen / notification capabilities: Play, Pause, SkipToNext, SkipToPrevious, Stop, SeekTo — with 1-second progress update interval.
 - Artwork on lock screen: deterministic per-song via `stableImageIndex` (djb2 hash of song URI % pool size) — same image appears in-app and on lock screen.
 - Audio focus / duck handling: `RemoteDuck` event in PlaybackService pauses on interruption, resumes on release.

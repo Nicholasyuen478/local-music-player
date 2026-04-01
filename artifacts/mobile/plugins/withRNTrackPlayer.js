@@ -1,5 +1,9 @@
 
-const { withAndroidManifest, withInfoPlist } = require("@expo/config-plugins");
+const path = require("path");
+const expoDir = path.dirname(require.resolve("expo/package.json"));
+const { withAndroidManifest, withInfoPlist } = require(
+  require.resolve("@expo/config-plugins", { paths: [expoDir] })
+);
 
 function addAndroidManifestChanges(androidManifest) {
   const app = androidManifest.manifest.application[0];
