@@ -28,7 +28,6 @@ function RootLayoutNav() {
 }
 
 export default function RootLayout() {
-  // Only load Inter fonts — lucide-react-native icons are SVG-based and need no font loading
   const [fontsLoaded, fontError] = useFonts({
     Inter_400Regular,
     Inter_500Medium,

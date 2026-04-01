@@ -1,10 +1,14 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import createContextHook from "@nkzw/create-context-hook";
-import {
-  useAudioPlayer,
-  useAudioPlayerStatus,
-  setAudioModeAsync,
-} from "expo-audio";
+import TrackPlayer, {
+  Capability,
+  RepeatMode,
+  State,
+  Track,
+  useActiveTrack,
+  usePlaybackState,
+  useProgress,
+} from "react-native-track-player";
 import * as ImagePicker from "expo-image-picker";
 import * as MediaLibrary from "expo-media-library";
 import React, { useCallback, useEffect, useRef, useState } from "react";
@@ -57,12 +61,6 @@ const SKIP_PATH_FRAGMENTS = [
 
 const MIN_DURATION_SECS = 30;
 
-// ── Filename-based metadata parser ─────────────────────────────────────
-// Priority order:
-//   1. "{title} - {artist}"  (with spaces, primary format)
-//   2. "{title}-{artist}"    (no spaces, split at last hyphen)
-//   3. Entire filename as title, "Unknown Artist" as artist
-
 function parseSongMeta(filename: string, uri: string, duration?: number): Song {
   const nameWithoutExt = filename.replace(/\.[^/.]+$/, "");
 
@@ -70,26 +68,21 @@ function parseSongMeta(filename: string, uri: string, duration?: number): Song {
   let artist = "Unknown Artist";
 
   if (nameWithoutExt.includes(" - ")) {
-    // Strategy 1: "{title} - {artist}" — split by last " - " so titles
-    // containing " - " are preserved correctly (e.g. "Live - Forever - Oasis")
     const lastSepIndex = nameWithoutExt.lastIndexOf(" - ");
     title = nameWithoutExt.substring(0, lastSepIndex).trim();
     artist = nameWithoutExt.substring(lastSepIndex + 3).trim();
   } else if (nameWithoutExt.includes("-")) {
-    // Strategy 2: "{title}-{artist}" — no spaces around the hyphen
     const lastDashIndex = nameWithoutExt.lastIndexOf("-");
     title = nameWithoutExt.substring(0, lastDashIndex).trim();
     artist = nameWithoutExt.substring(lastDashIndex + 1).trim();
   }
 
-  // Safety: never return empty strings
   if (!title) title = nameWithoutExt;
   if (!artist) artist = "Unknown Artist";
 
   return { id: uri, title, artist, uri, filename, duration };
 }
 
-// ── Audio scanner ───────────────────────────────────────────────────────
 async function scanDeviceAudio(): Promise<Song[]> {
   const { status } = await MediaLibrary.requestPermissionsAsync();
   if (status !== "granted") return [];
@@ -146,6 +139,56 @@ function shuffleArray<T>(arr: T[]): T[] {
   return copy;
 }
 
+function songToTrack(song: Song): Track {
+  return {
+    id: song.id,
+    url: song.uri,
+    title: song.title,
+    artist: song.artist,
+    duration: song.duration,
+  };
+}
+
+let playerSetup = false;
+
+async function setupPlayer() {
+  if (playerSetup) return;
+  try {
+    await TrackPlayer.setupPlayer({
+      autoHandleInterruptions: true,
+    });
+    await TrackPlayer.updateOptions({
+      capabilities: [
+        Capability.Play,
+        Capability.Pause,
+        Capability.SkipToNext,
+        Capability.SkipToPrevious,
+        Capability.SeekTo,
+      ],
+      compactCapabilities: [
+        Capability.Play,
+        Capability.Pause,
+        Capability.SkipToNext,
+        Capability.SkipToPrevious,
+      ],
+      notificationCapabilities: [
+        Capability.Play,
+        Capability.Pause,
+        Capability.SkipToNext,
+        Capability.SkipToPrevious,
+      ],
+    });
+    await TrackPlayer.setRepeatMode(RepeatMode.Queue);
+    playerSetup = true;
+  } catch (e: any) {
+    if (e?.message?.includes("already been initialized")) {
+      playerSetup = true;
+    } else {
+      throw e;
+    }
+  }
+}
+
 const [MusicContextProvider, useMusicContext] = createContextHook(() => {
   const [songs, setSongs] = useState<Song[]>([]);
   const [queue, setQueue] = useState<Song[]>([]);
@@ -156,22 +199,29 @@ const [MusicContextProvider, useMusicContext] = createContextHook(() => {
   const [imageFolderUri, setImageFolderUri] = useState<string | null>(null);
   const [isSetupDone, setIsSetupDone] = useState(false);
   const [hasCustomImages, setHasCustomImages] = useState(false);
+  const [isPlayerReady, setIsPlayerReady] = useState(false);
 
-  const player = useAudioPlayer(null);
-  const status = useAudioPlayerStatus(player);
+  const playbackState = usePlaybackState();
+  const progress = useProgress(250);
+  const activeTrack = useActiveTrack();
+
+  const isPlaying = playbackState.state === State.Playing;
+
   const currentSong = queue[currentIndex] ?? null;
 
   useEffect(() => {
-    setAudioModeAsync({
-      playsInSilentMode: true,
-      shouldPlayInBackground: true,
-      interruptionMode: "doNotMix",
-    });
+    setupPlayer()
+      .then(() => setIsPlayerReady(true))
+      .catch((e) => {
+        console.error("player setup error", e);
+        setIsPlayerReady(true);
+      });
   }, []);
 
   useEffect(() => {
+    if (!isPlayerReady) return;
     loadPersistedData();
-  }, []);
+  }, [isPlayerReady]);
 
   async function loadPersistedData() {
     setIsLoading(true);
@@ -212,10 +262,13 @@ const [MusicContextProvider, useMusicContext] = createContextHook(() => {
         setSongs(parsed);
         setQueue(q);
         setCurrentIndex(idx);
-        const song = q[idx];
-        if (song?.uri) {
-          player.replace({ uri: song.uri });
+
+        const tracks = q.map(songToTrack);
+        await TrackPlayer.setQueue(tracks);
+        if (idx > 0 && idx < tracks.length) {
+          await TrackPlayer.skip(idx);
         }
+
         setIsSetupDone(true);
       }
     } catch (e) {
@@ -225,28 +278,39 @@ const [MusicContextProvider, useMusicContext] = createContextHook(() => {
     }
   }
 
+  useEffect(() => {
+    if (!activeTrack?.id || queue.length === 0) return;
+    const idx = queue.findIndex((s) => s.id === activeTrack.id);
+    if (idx >= 0 && idx !== currentIndex) {
+      setCurrentIndex(idx);
+      AsyncStorage.setItem(STORAGE_KEYS.CURRENT_INDEX, String(idx));
+    }
+  }, [activeTrack?.id]);
+
   const scanDeviceMusic = useCallback(async (): Promise<boolean> => {
     setIsLoading(true);
     try {
       const found = await scanDeviceAudio();
       if (found.length === 0) return false;
 
+      let merged: Song[] = [];
       setSongs((prev) => {
-        const merged = [...prev];
+        merged = [...prev];
         for (const s of found) {
           if (!merged.find((x) => x.uri === s.uri)) merged.push(s);
         }
-        const next = merged;
-        AsyncStorage.setItem(STORAGE_KEYS.SONGS, JSON.stringify(next));
-        AsyncStorage.setItem(STORAGE_KEYS.QUEUE, JSON.stringify(next));
-        setQueue(next);
-        setCurrentIndex(0);
-        AsyncStorage.setItem(STORAGE_KEYS.CURRENT_INDEX, "0");
-        if (next[0]?.uri) {
-          player.replace({ uri: next[0].uri });
-        }
-        return next;
+        AsyncStorage.setItem(STORAGE_KEYS.SONGS, JSON.stringify(merged));
+        AsyncStorage.setItem(STORAGE_KEYS.QUEUE, JSON.stringify(merged));
+        return merged;
       });
+
+      await new Promise<void>((resolve) => setTimeout(resolve, 50));
+
+      const tracks = merged.map(songToTrack);
+      await TrackPlayer.setQueue(tracks);
+      setQueue(merged);
+      setCurrentIndex(0);
+      await AsyncStorage.setItem(STORAGE_KEYS.CURRENT_INDEX, "0");
 
       setIsSetupDone(true);
       return true;
@@ -256,7 +320,7 @@ const [MusicContextProvider, useMusicContext] = createContextHook(() => {
     } finally {
       setIsLoading(false);
     }
-  }, [player]);
+  }, []);
 
   const removeSongs = useCallback(
     async (ids: string[]) => {
@@ -278,6 +342,7 @@ const [MusicContextProvider, useMusicContext] = createContextHook(() => {
 
       if (newSongs.length === 0) {
         setIsSetupDone(false);
+        await TrackPlayer.reset();
         await Promise.all([
           AsyncStorage.removeItem(STORAGE_KEYS.SONGS),
           AsyncStorage.removeItem(STORAGE_KEYS.QUEUE),
@@ -286,9 +351,10 @@ const [MusicContextProvider, useMusicContext] = createContextHook(() => {
         return;
       }
 
-      const newCurrentSong = newQueue[newIdx];
-      if (idSet.has(currentSong?.id ?? "") && newCurrentSong?.uri) {
-        player.replace({ uri: newCurrentSong.uri });
+      const tracks = newQueue.map(songToTrack);
+      await TrackPlayer.setQueue(tracks);
+      if (newIdx > 0 && newIdx < tracks.length) {
+        await TrackPlayer.skip(newIdx);
       }
 
       await Promise.all([
@@ -297,10 +363,11 @@ const [MusicContextProvider, useMusicContext] = createContextHook(() => {
         AsyncStorage.setItem(STORAGE_KEYS.CURRENT_INDEX, String(newIdx)),
       ]);
     },
-    [songs, queue, currentIndex, currentSong, player],
+    [songs, queue, currentIndex, currentSong],
   );
 
   const resetSetup = useCallback(async () => {
+    await TrackPlayer.reset();
     await Promise.all([
       AsyncStorage.removeItem(STORAGE_KEYS.SONGS),
       AsyncStorage.removeItem(STORAGE_KEYS.QUEUE),
@@ -318,10 +385,17 @@ const [MusicContextProvider, useMusicContext] = createContextHook(() => {
         const q = newQueue ?? queue;
         const idx = indexInQueue ?? q.findIndex((s) => s.id === song.id);
         const resolvedIdx = idx >= 0 ? idx : 0;
+
+        if (newQueue) {
+          const tracks = newQueue.map(songToTrack);
+          await TrackPlayer.setQueue(tracks);
+          setQueue(newQueue);
+        }
+
+        await TrackPlayer.skip(resolvedIdx);
+        await TrackPlayer.play();
         setCurrentIndex(resolvedIdx);
-        if (newQueue) setQueue(newQueue);
-        player.replace({ uri: song.uri });
-        player.play();
+
         await Promise.all([
           AsyncStorage.setItem(STORAGE_KEYS.QUEUE, JSON.stringify(q)),
           AsyncStorage.setItem(STORAGE_KEYS.CURRENT_INDEX, String(resolvedIdx)),
@@ -330,53 +404,62 @@ const [MusicContextProvider, useMusicContext] = createContextHook(() => {
         console.error("play error", e);
       }
     },
-    [player, queue],
+    [queue],
   );
 
-  const togglePlayPause = useCallback(() => {
-    if (status.playing) player.pause();
-    else player.play();
-  }, [player, status.playing]);
+  const togglePlayPause = useCallback(async () => {
+    if (isPlaying) {
+      await TrackPlayer.pause();
+    } else {
+      await TrackPlayer.play();
+    }
+  }, [isPlaying]);
 
   const playNext = useCallback(async () => {
     if (queue.length === 0) return;
-    const nextIndex = (currentIndex + 1) % queue.length;
-    setCurrentIndex(nextIndex);
-    player.replace({ uri: queue[nextIndex].uri });
-    player.play();
-    await AsyncStorage.setItem(STORAGE_KEYS.CURRENT_INDEX, String(nextIndex));
-  }, [player, queue, currentIndex]);
+    try {
+      await TrackPlayer.skipToNext();
+      await TrackPlayer.play();
+    } catch {
+      await TrackPlayer.skip(0);
+      await TrackPlayer.play();
+    }
+  }, [queue.length]);
 
   const playPrev = useCallback(async () => {
     if (queue.length === 0) return;
-    const prevIndex = (currentIndex - 1 + queue.length) % queue.length;
-    setCurrentIndex(prevIndex);
-    player.replace({ uri: queue[prevIndex].uri });
-    player.play();
-    await AsyncStorage.setItem(STORAGE_KEYS.CURRENT_INDEX, String(prevIndex));
-  }, [player, queue, currentIndex]);
+    try {
+      await TrackPlayer.skipToPrevious();
+      await TrackPlayer.play();
+    } catch {
+      await TrackPlayer.skip(queue.length - 1);
+      await TrackPlayer.play();
+    }
+  }, [queue.length]);
 
   const toggleShuffle = useCallback(async () => {
     const next = !shuffleEnabled;
     setShuffleEnabled(next);
     await AsyncStorage.setItem(STORAGE_KEYS.SHUFFLE, String(next));
+
     const newOrder = next ? shuffleArray(songs) : [...songs];
     const newIdx = newOrder.findIndex((s) => s.id === currentSong?.id);
+    const resolvedIdx = newIdx >= 0 ? newIdx : 0;
+
+    const tracks = newOrder.map(songToTrack);
+    await TrackPlayer.setQueue(tracks);
+    if (resolvedIdx > 0) {
+      await TrackPlayer.skip(resolvedIdx);
+    }
+
     setQueue(newOrder);
-    setCurrentIndex(newIdx >= 0 ? newIdx : 0);
+    setCurrentIndex(resolvedIdx);
     await AsyncStorage.setItem(STORAGE_KEYS.QUEUE, JSON.stringify(newOrder));
   }, [shuffleEnabled, songs, currentSong]);
 
-  const playNextRef = useRef(playNext);
-  useEffect(() => {
-    playNextRef.current = playNext;
-  }, [playNext]);
-
-  useEffect(() => {
-    if (status.didJustFinish) {
-      playNextRef.current();
-    }
-  }, [status.didJustFinish]);
+  const seekTo = useCallback(async (secs: number) => {
+    await TrackPlayer.seekTo(secs);
+  }, []);
 
   const addImagesToPool = useCallback(
     async (uris: string[], isCustom = true) => {
@@ -423,12 +506,11 @@ const [MusicContextProvider, useMusicContext] = createContextHook(() => {
     [imagePool],
   );
 
-  const seekTo = useCallback(
-    (secs: number) => {
-      player.seekTo(secs);
-    },
-    [player],
-  );
+  const status = {
+    playing: isPlaying,
+    currentTime: progress.position,
+    duration: progress.duration,
+  };
 
   return {
     songs,
@@ -442,7 +524,6 @@ const [MusicContextProvider, useMusicContext] = createContextHook(() => {
     imageFolderUri,
     hasCustomImages,
     status,
-    player,
     scanDeviceMusic,
     removeSongs,
     resetSetup,
