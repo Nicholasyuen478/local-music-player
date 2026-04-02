@@ -6,16 +6,15 @@ import React, { useCallback, useState } from "react";
 import {
   Alert,
   FlatList,
-  Platform,
   StyleSheet,
   Text,
   TouchableOpacity,
   View,
 } from "react-native";
-import { useSafeAreaInsets } from "react-native-safe-area-context";
 import Colors from "@/constants/colors";
 import { useMusicContext } from "@/context/MusicContext";
 import { CropModal } from "@/components/CropModal";
+import { useLayout } from "@/hooks/useLayout";
 
 const THUMB_SIZE = 110;
 const COLUMNS = 3;
@@ -31,7 +30,7 @@ function isUserPickedUri(uri: string): boolean {
 }
 
 export default function ImagesScreen() {
-  const insets = useSafeAreaInsets();
+  const { topInset, bottomInset, tabBarH } = useLayout();
   const {
     imagePool,
     addImagesToPool,
@@ -41,9 +40,6 @@ export default function ImagesScreen() {
 
   const [isAdding, setIsAdding] = useState(false);
   const [cropUri, setCropUri] = useState<string | null>(null);
-
-  const topInset = Platform.OS === "web" ? 48 : insets.top;
-  const bottomInset = Platform.OS === "web" ? 90 : insets.bottom;
 
   const handlePickFiles = async () => {
     setIsAdding(true);
@@ -91,7 +87,7 @@ export default function ImagesScreen() {
       setCropUri(null);
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
     },
-    [cropImageInPool]
+    [cropImageInPool],
   );
 
   return (
@@ -124,7 +120,7 @@ export default function ImagesScreen() {
           showsVerticalScrollIndicator={false}
           contentContainerStyle={{
             paddingHorizontal: 12,
-            paddingBottom: bottomInset + 16,
+            paddingBottom: bottomInset + tabBarH + 16,
             gap: 4,
           }}
           columnWrapperStyle={{ gap: 4 }}

@@ -2,14 +2,13 @@ import { ScanSearch } from "lucide-react-native";
 import React from "react";
 import {
   ActivityIndicator,
-  Platform,
   StyleSheet,
   Text,
   TouchableOpacity,
   View,
 } from "react-native";
-import { useSafeAreaInsets } from "react-native-safe-area-context";
 import Colors from "@/constants/colors";
+import { useLayout } from "@/hooks/useLayout";
 
 type Props = {
   onScan: () => Promise<boolean>;
@@ -17,12 +16,15 @@ type Props = {
 };
 
 export function SetupScreen({ onScan, isLoading }: Props) {
-  const insets = useSafeAreaInsets();
-  const topInset = Platform.OS === "web" ? 48 : insets.top;
-  const bottomInset = Platform.OS === "web" ? 90 : insets.bottom;
+  const { topInset, controlsBottomPad } = useLayout();
 
   return (
-    <View style={[styles.container, { paddingTop: topInset, paddingBottom: bottomInset }]}>
+    <View
+      style={[
+        styles.container,
+        { paddingTop: topInset, paddingBottom: controlsBottomPad },
+      ]}
+    >
       <ScanSearch size={48} color={Colors.dark.textTertiary} />
       <Text style={styles.title}>Music Player</Text>
 

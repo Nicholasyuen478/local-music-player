@@ -13,25 +13,31 @@ import {
   Alert,
   Animated,
   PanResponder,
-  Platform,
   StyleSheet,
   Text,
   TouchableOpacity,
   View,
-  useWindowDimensions,
 } from "react-native";
-import { useSafeAreaInsets } from "react-native-safe-area-context";
 import Colors from "@/constants/colors";
 import { useMusicContext } from "@/context/MusicContext";
 import { SongArtwork } from "@/components/SongArtwork";
 import { SeekBar } from "@/components/SeekBar";
 import { SetupScreen } from "@/components/SetupScreen";
+import { useLayout } from "@/hooks/useLayout";
 
 const SWIPE_THRESHOLD = 60;
 
 export default function PlayerScreen() {
-  const insets = useSafeAreaInsets();
-  const { width } = useWindowDimensions();
+  const {
+    width,
+    isCompact,
+    topInset,
+    artSize,
+    artPadV,
+    controlsBottomPad,
+    fontScale,
+  } = useLayout();
+
   const [isScanning, setIsScanning] = useState(false);
   const hasAutoPlayed = useRef(false);
 
@@ -55,11 +61,6 @@ export default function PlayerScreen() {
     seekTo,
   } = useMusicContext();
 
-  // ── Derived values (no hooks, safe anywhere) ─────────────────────────
-  const artSize = Math.min(width - 48, 340);
-  const topInset = Platform.OS === "web" ? 48 : insets.top;
-  const bottomInset = Platform.OS === "web" ? 90 : insets.bottom;
-
   // ── Animated values ───────────────────────────────────────────────────
   const slideX = useRef(new Animated.Value(0)).current;
   const slideOpacity = useRef(new Animated.Value(1)).current;
@@ -68,13 +69,11 @@ export default function PlayerScreen() {
   const playNextRef = useRef(playNext);
   const playPrevRef = useRef(playPrev);
 
-  // ✅ HOOK — must be above early return
   useEffect(() => {
     playNextRef.current = playNext;
     playPrevRef.current = playPrev;
   }, [playNext, playPrev]);
 
-  // ✅ HOOK — auto-play on first load (moved above early return)
   useEffect(() => {
     if (!isSetupDone || !currentSong || hasAutoPlayed.current) return;
     if (status.playing) {
@@ -85,7 +84,7 @@ export default function PlayerScreen() {
     togglePlayPause();
   }, [isSetupDone, currentSong]); // togglePlayPause intentionally omitted
 
-  // ── Helpers (not hooks) ───────────────────────────────────────────────
+  // ── Helpers ───────────────────────────────────────────────────────────
   function animateSongChange(
     direction: "left" | "right",
     onComplete: () => void,
@@ -121,7 +120,6 @@ export default function PlayerScreen() {
     });
   }
 
-  // ── PanResponder (useRef is a hook — already at top level via .current) ──
   const panResponder = useRef(
     PanResponder.create({
       onMoveShouldSetPanResponder: (_, { dx, dy }) =>
@@ -211,12 +209,19 @@ export default function PlayerScreen() {
     toggleShuffle();
   }, [toggleShuffle]);
 
-  // ✅ Early return AFTER all hooks
+  // ── Early return AFTER all hooks ──────────────────────────────────────
   if (!isSetupDone) {
     return (
       <SetupScreen onScan={handleScan} isLoading={isScanning || isLoading} />
     );
   }
+
+  // ── Responsive sizes ──────────────────────────────────────────────────
+  const titleSize = Math.round(22 * fontScale);
+  const artistSize = Math.round(14 * fontScale);
+  const iconSize = isCompact ? 24 : 28;
+  const playBtnSize = isCompact ? 56 : 64;
+  const playIconSize = isCompact ? 28 : 32;
 
   return (
     <View style={[styles.container, { paddingTop: topInset }]}>
@@ -242,8 +247,8 @@ export default function PlayerScreen() {
         </TouchableOpacity>
       </View>
 
-      {/* Artwork */}
-      <View style={styles.artWrapper}>
+      {/* Artwork — fills remaining flex space, centered */}
+      <View style={[styles.artWrapper, { paddingVertical: artPadV }]}>
         <Animated.View
           style={{
             width: artSize,
@@ -265,12 +270,18 @@ export default function PlayerScreen() {
       </View>
 
       {/* Song info */}
-      <View style={styles.infoRow}>
+      <View style={[styles.infoRow, isCompact && styles.infoRowCompact]}>
         <View style={styles.infoText}>
-          <Text style={styles.songTitle} numberOfLines={1}>
+          <Text
+            style={[styles.songTitle, { fontSize: titleSize }]}
+            numberOfLines={1}
+          >
             {currentSong?.title ?? (songs.length > 0 ? "—" : "No songs")}
           </Text>
-          <Text style={styles.songArtist} numberOfLines={1}>
+          <Text
+            style={[styles.songArtist, { fontSize: artistSize }]}
+            numberOfLines={1}
+          >
             {currentSong?.artist ??
               (songs.length > 0 ? `${songs.length} songs` : "")}
           </Text>
@@ -281,7 +292,7 @@ export default function PlayerScreen() {
           activeOpacity={0.7}
         >
           <Shuffle
-            size={20}
+            size={isCompact ? 18 : 20}
             color={
               shuffleEnabled ? Colors.dark.accent : Colors.dark.textTertiary
             }
@@ -290,7 +301,7 @@ export default function PlayerScreen() {
       </View>
 
       {/* Seek bar */}
-      <View style={styles.seekSection}>
+      <View style={[styles.seekSection, isCompact && styles.seekSectionCompact]}>
         <SeekBar
           duration={status.duration ?? 0}
           position={status.currentTime ?? 0}
@@ -298,34 +309,33 @@ export default function PlayerScreen() {
         />
       </View>
 
-      {/* Controls */}
-      <View style={[styles.controls, { paddingBottom: bottomInset + 80 }]}>
+      {/* Playback controls */}
+      <View style={[styles.controls, { paddingBottom: controlsBottomPad }]}>
         <TouchableOpacity
           onPress={handlePrev}
           style={styles.controlBtn}
           activeOpacity={0.7}
         >
-          <SkipBack
-            size={28}
-            color={Colors.dark.text}
-            fill={Colors.dark.text}
-          />
+          <SkipBack size={iconSize} color={Colors.dark.text} fill={Colors.dark.text} />
         </TouchableOpacity>
 
         <TouchableOpacity
           onPress={handlePlayPause}
           activeOpacity={0.85}
-          style={styles.playBtn}
+          style={[
+            styles.playBtn,
+            { width: playBtnSize, height: playBtnSize, borderRadius: playBtnSize / 2 },
+          ]}
         >
           {status.playing ? (
             <Pause
-              size={32}
+              size={playIconSize}
               color={Colors.dark.background}
               fill={Colors.dark.background}
             />
           ) : (
             <Play
-              size={32}
+              size={playIconSize}
               color={Colors.dark.background}
               fill={Colors.dark.background}
               style={{ marginLeft: 3 }}
@@ -338,11 +348,7 @@ export default function PlayerScreen() {
           style={styles.controlBtn}
           activeOpacity={0.7}
         >
-          <SkipForward
-            size={28}
-            color={Colors.dark.text}
-            fill={Colors.dark.text}
-          />
+          <SkipForward size={iconSize} color={Colors.dark.text} fill={Colors.dark.text} />
         </TouchableOpacity>
       </View>
     </View>
@@ -367,7 +373,6 @@ const styles = StyleSheet.create({
   artWrapper: {
     alignItems: "center",
     paddingHorizontal: 24,
-    paddingVertical: 16,
     flex: 1,
     justifyContent: "center",
   },
@@ -378,18 +383,19 @@ const styles = StyleSheet.create({
     marginBottom: 4,
     gap: 12,
   },
+  infoRowCompact: {
+    marginBottom: 2,
+  },
   infoText: { flex: 1 },
   songTitle: {
     color: Colors.dark.text,
-    fontSize: 22,
     fontFamily: "Inter_700Bold",
     letterSpacing: -0.3,
   },
   songArtist: {
     color: Colors.dark.textSecondary,
-    fontSize: 14,
     fontFamily: "Inter_400Regular",
-    marginTop: 4,
+    marginTop: 3,
   },
   shuffleBtn: {
     width: 40,
@@ -400,6 +406,9 @@ const styles = StyleSheet.create({
   seekSection: {
     paddingHorizontal: 16,
     marginBottom: 8,
+  },
+  seekSectionCompact: {
+    marginBottom: 4,
   },
   controls: {
     flexDirection: "row",
@@ -415,9 +424,6 @@ const styles = StyleSheet.create({
     justifyContent: "center",
   },
   playBtn: {
-    width: 64,
-    height: 64,
-    borderRadius: 32,
     backgroundColor: Colors.dark.text,
     alignItems: "center",
     justifyContent: "center",

@@ -4,20 +4,19 @@ import React, { useCallback, useRef, useState } from "react";
 import {
   Alert,
   FlatList,
-  Platform,
   StyleSheet,
   Text,
   TouchableOpacity,
   View,
 } from "react-native";
-import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { useFocusEffect } from "expo-router"; //
+import { useFocusEffect } from "expo-router";
 import Colors from "@/constants/colors";
 import { useMusicContext } from "@/context/MusicContext";
 import type { Song } from "@/context/MusicContext";
+import { useLayout } from "@/hooks/useLayout";
 
 export default function LibraryScreen() {
-  const insets = useSafeAreaInsets();
+  const { topInset, bottomInset, tabBarH, isCompact } = useLayout();
   const {
     queue,
     currentIndex,
@@ -30,10 +29,9 @@ export default function LibraryScreen() {
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [selectMode, setSelectMode] = useState(false);
   const listRef = useRef<FlatList>(null);
-  const isListReady = useRef(false); // 
+  const isListReady = useRef(false);
 
-  const topInset = Platform.OS === "web" ? 48 : insets.top;
-  const bottomInset = Platform.OS === "web" ? 90 : insets.bottom;
+  const itemHeight = isCompact ? 52 : 56;
 
   const exitSelectMode = useCallback(() => {
     setSelectMode(false);
@@ -60,53 +58,43 @@ export default function LibraryScreen() {
         playSong(item, queue, index);
       }
     },
-    [selectMode, playSong, queue]
+    [selectMode, playSong, queue],
   );
 
   const handleRemove = useCallback(() => {
     const count = selectedIds.size;
-    Alert.alert(
-      `Remove ${count} song${count > 1 ? "s" : ""}?`,
-      undefined,
-      [
-        { text: "Cancel", style: "cancel" },
-        {
-          text: "Remove",
-          style: "destructive",
-          onPress: async () => {
-            await removeSongs([...selectedIds]);
-            exitSelectMode();
-          },
+    Alert.alert(`Remove ${count} song${count > 1 ? "s" : ""}?`, undefined, [
+      { text: "Cancel", style: "cancel" },
+      {
+        text: "Remove",
+        style: "destructive",
+        onPress: async () => {
+          await removeSongs([...selectedIds]);
+          exitSelectMode();
         },
-      ]
-    );
+      },
+    ]);
   }, [selectedIds, removeSongs, exitSelectMode]);
 
-  // ✅ Helper function to scroll to current
   const scrollToCurrent = useCallback(() => {
     if (currentIndex > 0 && listRef.current && isListReady.current) {
       listRef.current.scrollToIndex({
         index: Math.max(0, currentIndex - 2),
-        animated: true, // Optional: true makes it feel nicer when switching tabs
+        animated: true,
       });
     }
   }, [currentIndex]);
 
-  // ✅ 1. Scroll when list first renders (initial mount)
   const handleListLayout = useCallback(() => {
     isListReady.current = true;
     scrollToCurrent();
   }, [scrollToCurrent]);
 
-  // ✅ 2. Scroll every time user navigates back to this tab
   useFocusEffect(
     useCallback(() => {
-      // Small timeout ensures the tab transition finishes before scrolling
-      const timer = setTimeout(() => {
-        scrollToCurrent();
-      }, 100);
+      const timer = setTimeout(scrollToCurrent, 100);
       return () => clearTimeout(timer);
-    }, [scrollToCurrent])
+    }, [scrollToCurrent]),
   );
 
   const renderItem = useCallback(
@@ -118,6 +106,7 @@ export default function LibraryScreen() {
         <TouchableOpacity
           style={[
             styles.row,
+            { height: itemHeight, paddingVertical: isCompact ? 8 : 10 },
             isActive && !selectMode && styles.rowActive,
             isSelected && styles.rowSelected,
           ]}
@@ -127,18 +116,27 @@ export default function LibraryScreen() {
           activeOpacity={0.6}
         >
           {selectMode && (
-            <View style={[styles.checkbox, isSelected && styles.checkboxSelected]}>
+            <View
+              style={[styles.checkbox, isSelected && styles.checkboxSelected]}
+            >
               {isSelected && <Check size={11} color="#000" strokeWidth={3} />}
             </View>
           )}
           <View style={styles.rowText}>
             <Text
-              style={[styles.title, isActive && !selectMode && styles.titleActive]}
+              style={[
+                styles.title,
+                isActive && !selectMode && styles.titleActive,
+                isCompact && styles.titleCompact,
+              ]}
               numberOfLines={1}
             >
               {item.title}
             </Text>
-            <Text style={styles.artist} numberOfLines={1}>
+            <Text
+              style={[styles.artist, isCompact && styles.artistCompact]}
+              numberOfLines={1}
+            >
               {item.artist}
             </Text>
           </View>
@@ -146,12 +144,15 @@ export default function LibraryScreen() {
         </TouchableOpacity>
       );
     },
-    [currentSong, selectedIds, selectMode, handlePress, handleLongPress]
+    [currentSong, selectedIds, selectMode, handlePress, handleLongPress, itemHeight, isCompact],
   );
+
+  // Bottom padding: clear tab bar + safe area, extra room if select-mode action bar is shown
+  const listBottomPad = bottomInset + tabBarH + 16 + (selectMode ? 72 : 0);
 
   return (
     <View style={[styles.container, { paddingTop: topInset }]}>
-      <View style={styles.header}>
+      <View style={[styles.header, isCompact && styles.headerCompact]}>
         {selectMode ? (
           <>
             <Text style={styles.headerCount}>{selectedIds.size} selected</Text>
@@ -177,13 +178,11 @@ export default function LibraryScreen() {
           data={queue}
           keyExtractor={(item) => item.id}
           renderItem={renderItem}
-          contentContainerStyle={{
-            paddingBottom: (selectMode ? 80 : 0) + bottomInset + 16,
-          }}
+          contentContainerStyle={{ paddingBottom: listBottomPad }}
           showsVerticalScrollIndicator={false}
           getItemLayout={(_, index) => ({
-            length: ITEM_HEIGHT,
-            offset: ITEM_HEIGHT * index,
+            length: itemHeight,
+            offset: itemHeight * index,
             index,
           })}
           onLayout={handleListLayout}
@@ -198,9 +197,14 @@ export default function LibraryScreen() {
         />
       )}
 
-      {/* Select mode action bar */}
+      {/* Select mode action bar — sits above the tab bar */}
       {selectMode && (
-        <View style={[styles.actionBar, { paddingBottom: bottomInset + 8 }]}>
+        <View
+          style={[
+            styles.actionBar,
+            { bottom: tabBarH, paddingBottom: bottomInset + 8 },
+          ]}
+        >
           <TouchableOpacity
             style={[
               styles.removeBtn,
@@ -220,8 +224,6 @@ export default function LibraryScreen() {
   );
 }
 
-const ITEM_HEIGHT = 56;
-
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: Colors.dark.background },
   header: {
@@ -231,6 +233,10 @@ const styles = StyleSheet.create({
     paddingHorizontal: 24,
     paddingTop: 8,
     paddingBottom: 12,
+  },
+  headerCompact: {
+    paddingTop: 4,
+    paddingBottom: 8,
   },
   headerCount: {
     color: Colors.dark.textTertiary,
@@ -249,8 +255,6 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
     paddingHorizontal: 24,
-    paddingVertical: 10,
-    height: ITEM_HEIGHT,
     gap: 14,
   },
   rowActive: {
@@ -279,15 +283,15 @@ const styles = StyleSheet.create({
     fontSize: 15,
     fontFamily: "Inter_500Medium",
   },
-  titleActive: {
-    color: Colors.dark.text,
-  },
+  titleCompact: { fontSize: 14 },
+  titleActive: { color: Colors.dark.text },
   artist: {
     color: Colors.dark.textTertiary,
     fontSize: 12,
     fontFamily: "Inter_400Regular",
     marginTop: 2,
   },
+  artistCompact: { fontSize: 11, marginTop: 1 },
   activeBar: {
     width: 3,
     height: 18,
@@ -308,7 +312,6 @@ const styles = StyleSheet.create({
   },
   actionBar: {
     position: "absolute",
-    bottom: 52,
     left: 0,
     right: 0,
     paddingHorizontal: 24,

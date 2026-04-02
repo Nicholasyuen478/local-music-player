@@ -1,11 +1,15 @@
 import { Tabs } from "expo-router";
 import { ImageIcon, Library, Music2 } from "lucide-react-native";
 import React from "react";
-import { Platform, StyleSheet, View } from "react-native";
+import { Platform, StyleSheet, useWindowDimensions, View } from "react-native";
 import { BlurView } from "expo-blur";
 import Colors from "@/constants/colors";
+import { TAB_BAR_H_COMPACT, TAB_BAR_H_NORMAL } from "@/hooks/useLayout";
 
 export default function TabLayout() {
+  const { height } = useWindowDimensions();
+  const isCompact = height < 700;
+  const tabBarHeight = isCompact ? TAB_BAR_H_COMPACT : TAB_BAR_H_NORMAL;
   const isIOS = Platform.OS === "ios";
 
   return (
@@ -21,7 +25,7 @@ export default function TabLayout() {
           borderTopWidth: StyleSheet.hairlineWidth,
           borderTopColor: Colors.dark.border,
           elevation: 0,
-          height: 52,
+          height: tabBarHeight,
         },
         tabBarBackground: () =>
           isIOS ? (
@@ -31,24 +35,27 @@ export default function TabLayout() {
               style={[StyleSheet.absoluteFill, { backgroundColor: Colors.dark.background }]}
             />
           ),
+        tabBarIconStyle: {
+          marginTop: isCompact ? 0 : 2,
+        },
       }}
     >
       <Tabs.Screen
         name="index"
         options={{
-          tabBarIcon: ({ color }) => <Music2 size={22} color={color} />,
+          tabBarIcon: ({ color }) => <Music2 size={isCompact ? 20 : 22} color={color} />,
         }}
       />
       <Tabs.Screen
         name="library"
         options={{
-          tabBarIcon: ({ color }) => <Library size={22} color={color} />,
+          tabBarIcon: ({ color }) => <Library size={isCompact ? 20 : 22} color={color} />,
         }}
       />
       <Tabs.Screen
         name="images"
         options={{
-          tabBarIcon: ({ color }) => <ImageIcon size={22} color={color} />,
+          tabBarIcon: ({ color }) => <ImageIcon size={isCompact ? 20 : 22} color={color} />,
         }}
       />
     </Tabs>
