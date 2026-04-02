@@ -1,9 +1,10 @@
 import * as Haptics from "expo-haptics";
 import { Image } from "expo-image";
 import * as ImagePicker from "expo-image-picker";
-import { Crop, ImageIcon, Plus, X } from "lucide-react-native";
+import { ImageIcon, Plus, Scissors, X } from "lucide-react-native";
 import React, { useCallback, useState } from "react";
 import {
+  ActivityIndicator,
   Alert,
   FlatList,
   StyleSheet,
@@ -11,15 +12,15 @@ import {
   TouchableOpacity,
   View,
 } from "react-native";
+import ImageCropPicker from "react-native-image-crop-picker";
 import Colors from "@/constants/colors";
 import { useMusicContext } from "@/context/MusicContext";
-import { CropModal } from "@/components/CropModal";
 import { useLayout } from "@/hooks/useLayout";
 
 const THUMB_SIZE = 110;
 const COLUMNS = 3;
 
-/** Returns true only for user-picked images (file://, content://, https://) */
+/** Only user-picked images (not bundled assets) can be cropped */
 function isUserPickedUri(uri: string): boolean {
   return (
     uri.startsWith("file://") ||
@@ -31,20 +32,18 @@ function isUserPickedUri(uri: string): boolean {
 
 export default function ImagesScreen() {
   const { topInset, bottomInset, tabBarH } = useLayout();
-  const {
-    imagePool,
-    addImagesToPool,
-    removeImageFromPool,
-    cropImageInPool,
-  } = useMusicContext();
+  const { imagePool, addImagesToPool, removeImageFromPool, cropImageInPool } =
+    useMusicContext();
 
   const [isAdding, setIsAdding] = useState(false);
-  const [cropUri, setCropUri] = useState<string | null>(null);
+  const [croppingUri, setCroppingUri] = useState<string | null>(null);
 
+  // ── Add images ──────────────────────────────────────────────────────────
   const handlePickFiles = async () => {
     setIsAdding(true);
     try {
-      const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
+      const { status } =
+        await ImagePicker.requestMediaLibraryPermissionsAsync();
       if (status !== "granted") return;
       const result = await ImagePicker.launchImageLibraryAsync({
         mediaTypes: ["images"],
@@ -64,6 +63,7 @@ export default function ImagesScreen() {
     }
   };
 
+  // ── Remove image ─────────────────────────────────────────────────────────
   const handleRemove = (uri: string) => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
     Alert.alert("Remove image?", undefined, [
@@ -76,16 +76,40 @@ export default function ImagesScreen() {
     ]);
   };
 
-  const handleOpenCrop = useCallback((uri: string) => {
-    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-    setCropUri(uri);
-  }, []);
-
-  const handleCropSave = useCallback(
-    async (croppedUri: string, originalUri: string) => {
-      await cropImageInPool(originalUri, croppedUri);
-      setCropUri(null);
-      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+  // ── Crop image via react-native-image-crop-picker ───────────────────────
+  // Uses the library's native crop UI — no custom canvas math needed.
+  const handleCrop = useCallback(
+    async (uri: string) => {
+      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+      setCroppingUri(uri);
+      try {
+        const result = await ImageCropPicker.openCropper({
+          path: uri,
+          width: 1000,
+          height: 1000,
+          cropping: true,
+          mediaType: "photo",
+          compressImageQuality: 0.92,
+          // Keep the crop square (1:1 aspect ratio)
+          freeStyleCropEnabled: false,
+          // Android toolbar theming
+          cropperToolbarTitle: "Crop image",
+          cropperActiveWidgetColor: Colors.dark.accent,
+          cropperStatusBarColor: "#000000",
+          cropperToolbarColor: "#111111",
+          cropperToolbarWidgetColor: "#FFFFFF",
+        });
+        const croppedUri = result.path;
+        await cropImageInPool(uri, croppedUri);
+        Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+      } catch (e: any) {
+        // E_PICKER_CANCELLED = user dismissed — not an error
+        if (e?.code !== "E_PICKER_CANCELLED") {
+          console.error("crop error", e);
+        }
+      } finally {
+        setCroppingUri(null);
+      }
     },
     [cropImageInPool],
   );
@@ -124,47 +148,54 @@ export default function ImagesScreen() {
             gap: 4,
           }}
           columnWrapperStyle={{ gap: 4 }}
-          renderItem={({ item }) => (
-            <View style={styles.thumb}>
-              <Image
-                source={{ uri: item }}
-                style={styles.thumbImg}
-                contentFit="cover"
-                transition={200}
-              />
-              {/* Crop button — bottom-left (hidden for default/bundled assets) */}
-              {isUserPickedUri(item) && (
+          renderItem={({ item }) => {
+            const isCropping = croppingUri === item;
+            const canCrop = isUserPickedUri(item);
+
+            return (
+              <View style={styles.thumb}>
+                <Image
+                  source={{ uri: item }}
+                  style={styles.thumbImg}
+                  contentFit="cover"
+                  transition={200}
+                />
+
+                {/* Crop spinner overlay while this specific image is being cropped */}
+                {isCropping && (
+                  <View style={styles.spinnerOverlay}>
+                    <ActivityIndicator size="small" color="#fff" />
+                  </View>
+                )}
+
+                {/* Crop button — bottom-left, only for user-picked images */}
+                {canCrop && !isCropping && (
+                  <TouchableOpacity
+                    style={[styles.overlayBtn, styles.cropBtn]}
+                    onPress={() => handleCrop(item)}
+                    hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                  >
+                    <View style={styles.overlayBtnInner}>
+                      <Scissors size={10} color="#fff" />
+                    </View>
+                  </TouchableOpacity>
+                )}
+
+                {/* Remove button — top-right */}
                 <TouchableOpacity
-                  style={[styles.overlayBtn, styles.cropBtn]}
-                  onPress={() => handleOpenCrop(item)}
-                  hitSlop={{ top: 6, bottom: 6, left: 6, right: 6 }}
+                  style={[styles.overlayBtn, styles.removeBtn]}
+                  onPress={() => handleRemove(item)}
+                  hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
                 >
                   <View style={styles.overlayBtnInner}>
-                    <Crop size={10} color="#fff" />
+                    <X size={10} color="#fff" />
                   </View>
                 </TouchableOpacity>
-              )}
-              {/* Remove button — top-right */}
-              <TouchableOpacity
-                style={[styles.overlayBtn, styles.removeBtn]}
-                onPress={() => handleRemove(item)}
-                hitSlop={{ top: 6, bottom: 6, left: 6, right: 6 }}
-              >
-                <View style={styles.overlayBtnInner}>
-                  <X size={10} color="#fff" />
-                </View>
-              </TouchableOpacity>
-            </View>
-          )}
+              </View>
+            );
+          }}
         />
       )}
-
-      <CropModal
-        visible={cropUri !== null}
-        uri={cropUri}
-        onSave={handleCropSave}
-        onClose={() => setCropUri(null)}
-      />
     </View>
   );
 }
@@ -201,13 +232,19 @@ const styles = StyleSheet.create({
     position: "relative",
   },
   thumbImg: { width: "100%", height: "100%" },
+  spinnerOverlay: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: "rgba(0,0,0,0.55)",
+    alignItems: "center",
+    justifyContent: "center",
+  },
   overlayBtn: { position: "absolute" },
   cropBtn: { bottom: 6, left: 6 },
   removeBtn: { top: 6, right: 6 },
   overlayBtnInner: {
-    width: 20,
-    height: 20,
-    borderRadius: 10,
+    width: 22,
+    height: 22,
+    borderRadius: 11,
     backgroundColor: "rgba(0,0,0,0.72)",
     alignItems: "center",
     justifyContent: "center",

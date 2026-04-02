@@ -118,6 +118,41 @@ const SKIP_FILENAME_PATTERNS = [
  */
 const MIN_DURATION_SECS = 60;
 
+// ── iTunes artwork cache (module-level, lives for the app session) ────────────
+// key = "title::artist" (lowercased)
+// value = artwork URL string, or null if lookup returned no result
+const _artworkCache = new Map<string, string | null>();
+
+/**
+ * Fetch album artwork from the iTunes Search API.
+ * Free, no API key needed. Falls back to undefined on any error.
+ */
+async function fetchItunesArtwork(
+  title: string,
+  artist: string,
+): Promise<string | undefined> {
+  const cacheKey = `${title.toLowerCase()}::${artist.toLowerCase()}`;
+  if (_artworkCache.has(cacheKey)) {
+    return _artworkCache.get(cacheKey) ?? undefined;
+  }
+  try {
+    const q = encodeURIComponent(`${title} ${artist}`);
+    const res = await fetch(
+      `https://itunes.apple.com/search?term=${q}&media=music&entity=song&limit=1`,
+    );
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const json = await res.json();
+    const raw: string | undefined = json?.results?.[0]?.artworkUrl100;
+    // Upgrade 100×100 thumbnail to 600×600 for lock-screen quality
+    const url = raw ? raw.replace("100x100bb", "600x600bb") : null;
+    _artworkCache.set(cacheKey, url);
+    return url ?? undefined;
+  } catch {
+    _artworkCache.set(cacheKey, null);
+    return undefined;
+  }
+}
+
 function parseSongMeta(filename: string, uri: string, duration?: number): Song {
   const nameWithoutExt = filename.replace(/\.[^/.]+$/, "");
 
@@ -204,18 +239,20 @@ function shuffleArray<T>(arr: T[]): T[] {
   return copy;
 }
 
-function songToTrack(song: Song, imagePool?: string[]): Track {
-  const artwork =
-    imagePool && imagePool.length > 0
-      ? imagePool[stableImageIndex(song.id, imagePool.length)]
-      : undefined;
+/**
+ * Converts a Song to a TrackPlayer Track.
+ * Artwork is intentionally NOT populated here — it will be fetched from
+ * iTunes and injected via updateNowPlayingMetadata when the track becomes active.
+ * The in-app image pool display is handled separately by SongArtwork.
+ */
+function songToTrack(song: Song): Track {
   return {
     id: song.id,
     url: song.uri,
     title: song.title,
     artist: song.artist,
     duration: song.duration,
-    artwork,
+    // artwork intentionally absent — fetched from iTunes per active track
   };
 }
 
@@ -278,6 +315,9 @@ const [MusicContextProvider, useMusicContext] = createContextHook(() => {
   useEffect(() => {
     imagePoolRef.current = imagePool;
   }, [imagePool]);
+
+  // Tracks which song ID already had its lock-screen artwork fetched this session
+  const artworkFetchedFor = useRef<string>("");
 
   const playbackState = usePlaybackState();
   const progress = useProgress(250);
@@ -344,7 +384,7 @@ const [MusicContextProvider, useMusicContext] = createContextHook(() => {
         setQueue(q);
         setCurrentIndex(idx);
 
-        const tracks = q.map((s) => songToTrack(s, imagePoolRef.current));
+        const tracks = q.map(songToTrack);
         await TrackPlayer.setQueue(tracks);
         if (idx > 0 && idx < tracks.length) {
           await TrackPlayer.skip(idx);
@@ -359,12 +399,30 @@ const [MusicContextProvider, useMusicContext] = createContextHook(() => {
     }
   }
 
+  // ── Update current index + fetch lock-screen artwork when track changes ─
   useEffect(() => {
     if (!activeTrack?.id || queue.length === 0) return;
+
     const idx = queue.findIndex((s) => s.id === activeTrack.id);
     if (idx >= 0 && idx !== currentIndex) {
       setCurrentIndex(idx);
       AsyncStorage.setItem(STORAGE_KEYS.CURRENT_INDEX, String(idx));
+    }
+
+    const song = idx >= 0 ? queue[idx] : null;
+    if (song && artworkFetchedFor.current !== song.id) {
+      artworkFetchedFor.current = song.id;
+      // Fire-and-forget: fetch from iTunes and push to lock screen
+      fetchItunesArtwork(song.title, song.artist)
+        .then((artworkUrl) => {
+          if (artworkUrl) {
+            // Update the lock-screen / notification artwork only
+            TrackPlayer.updateNowPlayingMetadata({ artwork: artworkUrl }).catch(
+              () => {},
+            );
+          }
+        })
+        .catch(() => {});
     }
   }, [activeTrack?.id]);
 
@@ -387,11 +445,17 @@ const [MusicContextProvider, useMusicContext] = createContextHook(() => {
 
       await new Promise<void>((resolve) => setTimeout(resolve, 50));
 
-      const tracks = merged.map((s) => songToTrack(s, imagePoolRef.current));
+      const tracks = merged.map(songToTrack);
       await TrackPlayer.setQueue(tracks);
       setQueue(merged);
       setCurrentIndex(0);
-      await AsyncStorage.setItem(STORAGE_KEYS.CURRENT_INDEX, "0");
+
+      // ── Reset shuffle to OFF on every scan ──────────────────────────────
+      setShuffleEnabled(false);
+      await AsyncStorage.multiSet([
+        [STORAGE_KEYS.CURRENT_INDEX, "0"],
+        [STORAGE_KEYS.SHUFFLE, "false"],
+      ]);
 
       setIsSetupDone(true);
       return true;
@@ -432,7 +496,7 @@ const [MusicContextProvider, useMusicContext] = createContextHook(() => {
         return;
       }
 
-      const tracks = newQueue.map((s) => songToTrack(s, imagePoolRef.current));
+      const tracks = newQueue.map(songToTrack);
       await TrackPlayer.setQueue(tracks);
       if (newIdx > 0 && newIdx < tracks.length) {
         await TrackPlayer.skip(newIdx);
@@ -453,11 +517,14 @@ const [MusicContextProvider, useMusicContext] = createContextHook(() => {
       AsyncStorage.removeItem(STORAGE_KEYS.SONGS),
       AsyncStorage.removeItem(STORAGE_KEYS.QUEUE),
       AsyncStorage.removeItem(STORAGE_KEYS.CURRENT_INDEX),
+      // ── Reset shuffle to OFF on clear ──────────────────────────────────
+      AsyncStorage.setItem(STORAGE_KEYS.SHUFFLE, "false"),
     ]);
     setIsSetupDone(false);
     setSongs([]);
     setQueue([]);
     setCurrentIndex(0);
+    setShuffleEnabled(false);
   }, []);
 
   const playSong = useCallback(
@@ -468,7 +535,7 @@ const [MusicContextProvider, useMusicContext] = createContextHook(() => {
         const resolvedIdx = idx >= 0 ? idx : 0;
 
         if (newQueue) {
-          const tracks = newQueue.map((s) => songToTrack(s, imagePoolRef.current));
+          const tracks = newQueue.map(songToTrack);
           await TrackPlayer.setQueue(tracks);
           setQueue(newQueue);
         }
@@ -527,7 +594,7 @@ const [MusicContextProvider, useMusicContext] = createContextHook(() => {
     const newIdx = newOrder.findIndex((s) => s.id === currentSong?.id);
     const resolvedIdx = newIdx >= 0 ? newIdx : 0;
 
-    const tracks = newOrder.map((s) => songToTrack(s, imagePoolRef.current));
+    const tracks = newOrder.map(songToTrack);
     await TrackPlayer.setQueue(tracks);
     if (resolvedIdx > 0) {
       await TrackPlayer.skip(resolvedIdx);
