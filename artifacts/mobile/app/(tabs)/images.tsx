@@ -20,6 +20,16 @@ import { CropModal } from "@/components/CropModal";
 const THUMB_SIZE = 110;
 const COLUMNS = 3;
 
+/** Returns true only for user-picked images (file://, content://, https://) */
+function isUserPickedUri(uri: string): boolean {
+  return (
+    uri.startsWith("file://") ||
+    uri.startsWith("content://") ||
+    uri.startsWith("http://") ||
+    uri.startsWith("https://")
+  );
+}
+
 export default function ImagesScreen() {
   const insets = useSafeAreaInsets();
   const {
@@ -126,16 +136,18 @@ export default function ImagesScreen() {
                 contentFit="cover"
                 transition={200}
               />
-              {/* Crop button — bottom-left */}
-              <TouchableOpacity
-                style={[styles.overlayBtn, styles.cropBtn]}
-                onPress={() => handleOpenCrop(item)}
-                hitSlop={{ top: 6, bottom: 6, left: 6, right: 6 }}
-              >
-                <View style={styles.overlayBtnInner}>
-                  <Crop size={10} color="#fff" />
-                </View>
-              </TouchableOpacity>
+              {/* Crop button — bottom-left (hidden for default/bundled assets) */}
+              {isUserPickedUri(item) && (
+                <TouchableOpacity
+                  style={[styles.overlayBtn, styles.cropBtn]}
+                  onPress={() => handleOpenCrop(item)}
+                  hitSlop={{ top: 6, bottom: 6, left: 6, right: 6 }}
+                >
+                  <View style={styles.overlayBtnInner}>
+                    <Crop size={10} color="#fff" />
+                  </View>
+                </TouchableOpacity>
+              )}
               {/* Remove button — top-right */}
               <TouchableOpacity
                 style={[styles.overlayBtn, styles.removeBtn]}

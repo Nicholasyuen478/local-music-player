@@ -1,0 +1,73 @@
+Here's the message you can send directly to Replit:
+
+***
+
+**Fix CropModal bugs in the React Native app (Expo SDK 52)**
+
+Please fix the following two bugs in the `CropModal` component:
+
+***
+
+## Bug 1 — Crop region is incorrect / not cropping the right area
+
+**Root cause:** In Expo SDK 52, `expo-image-manipulator` has a breaking API change. The `manipulateAsync` function and action structure behave differently. The crop math relies on `dispW`, `dispH`, `imgLeft`, `imgTop`, `frameLeft`, `frameTop`, and `cropFrameSize` — but these values are **computed at render time outside the `useCallback`**, so they may be stale when `handleDone` fires (especially after the image loads and `imageNaturalSize` updates). The `panResponder` is also created once in `useRef` and captures stale closure values of `imgLeft`, `imgTop`, `dispW`, `dispH`.
+
+**Fix instructions:**
+
+1. Move the display dimension calculations (`aspect`, `dispW`, `dispH`, `imgLeft`, `imgTop`) into a `useMemo` that depends on `imageNaturalSize`, `width`, and `height`, so they are always up to date.
+2. In `handleDone`, read all dimension values from the memoized result instead of raw render-scope variables, ensuring no stale closure issue.
+3. Replace `ImageManipulator.manipulateAsync` with the **Expo SDK 52 compatible API**. In SDK 52, `expo-image-manipulator` uses a new imperative API:
+
+```ts
+const context = ImageManipulator.useImageManipulator(uri);
+// OR use the new ImageManipulator.manipulate() builder pattern:
+const result = await ImageManipulator.manipulate(uri)
+  .crop({ originX: cropX, originY: cropY, width: cropW, height: cropH })
+  .renderAsync();
+const saved = await result.saveAsync({ compress: 0.92, format: ImageManipulator.SaveFormat.JPEG });
+```
+
+Replace the current `manipulateAsync(uri, [{ crop: {...} }], options)` call with the builder pattern above. This is the key SDK 52 breaking change that causes wrong or failed crops.
+
+***
+
+## Bug 2 — Pan/drag gesture is not working to select the crop region
+
+**Root cause:** The `PanResponder` is initialized once inside `useRef(PanResponder.create({...}))`, which means it captures the **initial stale values** of `imgLeft`, `imgTop`, `dispW`, `dispH` (all computed from `imageNaturalSize` which starts at `{ w: 1, h: 1 }`). After the image loads and dimensions update, the pan responder is still working with the old geometry.
+
+**Fix instructions:**
+
+1. Store `dispW`, `dispH`, `imgLeft`, `imgTop` in refs (e.g. `dispWRef`, `imgLeftRef`) that are updated on every render, so the `PanResponder` callbacks always read the latest values via `.current`.
+2. Make sure the `Animated.View` with `{...panResponder.panHandlers}` covers the entire screen (`flex: 1` or `position: absolute, top:0, left:0, right:0, bottom:0`), not just the image area. If the touch target is clipped to the image bounds, touches outside the initially small image won't register.
+3. Ensure the `Animated.View` wrapper `zIndex` is below the overlay dark views and crop frame, but still receives gestures — or alternatively place `panHandlers` on the full-screen container instead.
+
+***
+
+## Bug 3 — Hide the Crop button for default/built-in images
+
+In the screen or component that renders the Crop button, add a check to hide it when the current image is a default/bundled asset (not a user-picked image from the camera roll).
+
+**Fix instructions:**
+
+1. Identify whether the image `uri` is a default asset. A reliable way: default images loaded via `require()` will have a URI that starts with a local bundle path or is a number (asset ID), not a `file://` or `content://` or `https://` URI from the picker.
+2. In the parent component that shows the Crop button, add a condition like:
+
+```tsx
+const isDefaultImage = !uri || (!uri.startsWith('file://') && !uri.startsWith('content://') && !uri.startsWith('http'));
+
+// Then in JSX:
+{!isDefaultImage && (
+  <TouchableOpacity onPress={openCropModal}>
+    <Text>Crop</Text>
+  </TouchableOpacity>
+)}
+```
+
+3. Also pass this guard to prevent `CropModal` from opening at all when `isDefaultImage` is true.
+
+***
+
+**Summary of changes needed:**
+- Migrate `manipulateAsync` → `ImageManipulator.manipulate().crop().renderAsync().saveAsync()` (SDK 52 builder API)
+- Fix stale closure in `handleDone` and `PanResponder` by using refs for display dimensions
+- Hide Crop button when the image is a default/bundled asset, not a user-uploaded one

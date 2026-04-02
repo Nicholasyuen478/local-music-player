@@ -1,6 +1,6 @@
 import * as Haptics from "expo-haptics";
-import * as ImageManipulator from "expo-image-manipulator";
-import React, { useRef, useState, useCallback } from "react";
+import { ImageManipulator, SaveFormat } from "expo-image-manipulator";
+import React, { useRef, useState, useCallback, useMemo } from "react";
 import {
   Animated,
   Image,
@@ -34,6 +34,32 @@ export function CropModal({ visible, uri, onSave, onClose }: Props) {
   const frameLeft = CROP_FRAME_PADDING;
   const frameTop = (height - cropFrameSize) / 2;
 
+  // Memoised layout — recomputed whenever image dimensions or screen size change
+  const layout = useMemo(() => {
+    const aspect = imageNaturalSize.w / imageNaturalSize.h;
+    let dispW = width;
+    let dispH = width / aspect;
+    if (dispH < height) {
+      dispH = height;
+      dispW = height * aspect;
+    }
+    const imgLeft = (width - dispW) / 2;
+    const imgTop = (height - dispH) / 2;
+    return { dispW, dispH, imgLeft, imgTop };
+  }, [imageNaturalSize, width, height]);
+
+  // Refs so the PanResponder closure always reads the latest layout values
+  const dispWRef = useRef(layout.dispW);
+  const dispHRef = useRef(layout.dispH);
+  const imgLeftRef = useRef(layout.imgLeft);
+  const imgTopRef = useRef(layout.imgTop);
+
+  // Keep refs in sync with memoised layout on every render
+  dispWRef.current = layout.dispW;
+  dispHRef.current = layout.dispH;
+  imgLeftRef.current = layout.imgLeft;
+  imgTopRef.current = layout.imgTop;
+
   const panX = useRef(new Animated.Value(0)).current;
   const panY = useRef(new Animated.Value(0)).current;
   const currentPanX = useRef(0);
@@ -41,20 +67,10 @@ export function CropModal({ visible, uri, onSave, onClose }: Props) {
   const offsetX = useRef(0);
   const offsetY = useRef(0);
 
-  const aspect = imageNaturalSize.w / imageNaturalSize.h;
-  let dispW = width;
-  let dispH = width / aspect;
-  if (dispH < height) {
-    dispH = height;
-    dispW = height * aspect;
-  }
-
-  const imgLeft = (width - dispW) / 2;
-  const imgTop = (height - dispH) / 2;
-
   const panResponder = useRef(
     PanResponder.create({
       onStartShouldSetPanResponder: () => true,
+      onMoveShouldSetPanResponder: () => true,
       onPanResponderGrant: () => {
         offsetX.current = currentPanX.current;
         offsetY.current = currentPanY.current;
@@ -73,49 +89,51 @@ export function CropModal({ visible, uri, onSave, onClose }: Props) {
     if (!uri || isSaving) return;
     setIsSaving(true);
     try {
+      // Read from refs — always fresh even if this callback was closed over stale values
+      const dW = dispWRef.current;
+      const dH = dispHRef.current;
+      const iL = imgLeftRef.current;
+      const iT = imgTopRef.current;
       const px = currentPanX.current;
       const py = currentPanY.current;
 
-      const actualImgLeft = imgLeft + px;
-      const actualImgTop = imgTop + py;
+      const naturalW = imageNaturalSize.w;
+      const naturalH = imageNaturalSize.h;
 
-      const scaleX = imageNaturalSize.w / dispW;
-      const scaleY = imageNaturalSize.h / dispH;
+      const actualImgLeft = iL + px;
+      const actualImgTop = iT + py;
+
+      const scaleX = naturalW / dW;
+      const scaleY = naturalH / dH;
 
       let cropX = (frameLeft - actualImgLeft) * scaleX;
       let cropY = (frameTop - actualImgTop) * scaleY;
       let cropW = cropFrameSize * scaleX;
       let cropH = cropFrameSize * scaleY;
 
-      cropX = Math.max(0, Math.min(cropX, imageNaturalSize.w - 10));
-      cropY = Math.max(0, Math.min(cropY, imageNaturalSize.h - 10));
-      cropW = Math.max(10, Math.min(cropW, imageNaturalSize.w - cropX));
-      cropH = Math.max(10, Math.min(cropH, imageNaturalSize.h - cropY));
+      cropX = Math.max(0, Math.min(cropX, naturalW - 10));
+      cropY = Math.max(0, Math.min(cropY, naturalH - 10));
+      cropW = Math.max(10, Math.min(cropW, naturalW - cropX));
+      cropH = Math.max(10, Math.min(cropH, naturalH - cropY));
 
-      const result = await ImageManipulator.manipulateAsync(
-        uri,
-        [
-          {
-            crop: {
-              originX: cropX,
-              originY: cropY,
-              width: cropW,
-              height: cropH,
-            },
-          },
-        ],
-        { compress: 0.92, format: ImageManipulator.SaveFormat.JPEG },
-      );
+      // SDK 52 builder API
+      const context = ImageManipulator.manipulate(uri);
+      context.crop({ originX: cropX, originY: cropY, width: cropW, height: cropH });
+      const imageRef = await context.renderAsync();
+      const saved = await imageRef.saveAsync({
+        compress: 0.92,
+        format: SaveFormat.JPEG,
+      });
 
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-      onSave(result.uri, uri);
+      onSave(saved.uri, uri);
     } catch (e) {
       console.error("crop error", e);
       onClose();
     } finally {
       setIsSaving(false);
     }
-  }, [uri, isSaving, imageNaturalSize, dispW, dispH, imgLeft, imgTop, frameLeft, frameTop, cropFrameSize, onSave, onClose]);
+  }, [uri, isSaving, imageNaturalSize, frameLeft, frameTop, cropFrameSize, onSave, onClose]);
 
   const handleCancel = useCallback(() => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
@@ -128,6 +146,7 @@ export function CropModal({ visible, uri, onSave, onClose }: Props) {
 
   if (!uri) return null;
 
+  const { dispW, dispH, imgLeft, imgTop } = layout;
   const bottomPad = Platform.OS === "web" ? 24 : insets.bottom + 16;
 
   return (
@@ -143,7 +162,15 @@ export function CropModal({ visible, uri, onSave, onClose }: Props) {
       }}
     >
       <View style={styles.container}>
+        {/* Full-screen gesture catcher — must be behind overlay views but receive touches */}
         <Animated.View
+          style={[StyleSheet.absoluteFill, styles.gestureLayer]}
+          {...panResponder.panHandlers}
+        />
+
+        {/* The image moves with pan */}
+        <Animated.View
+          pointerEvents="none"
           style={[
             styles.imageWrapper,
             {
@@ -154,7 +181,6 @@ export function CropModal({ visible, uri, onSave, onClose }: Props) {
               transform: [{ translateX: panX }, { translateY: panY }],
             },
           ]}
-          {...panResponder.panHandlers}
         >
           <Image
             source={{ uri }}
@@ -166,17 +192,24 @@ export function CropModal({ visible, uri, onSave, onClose }: Props) {
           />
         </Animated.View>
 
-        <View style={[styles.darkTop, { height: frameTop }]} />
+        {/* Dark overlay quadrants */}
         <View
+          pointerEvents="none"
+          style={[styles.darkTop, { height: frameTop }]}
+        />
+        <View
+          pointerEvents="none"
           style={[styles.darkBottom, { top: frameTop + cropFrameSize }]}
         />
         <View
+          pointerEvents="none"
           style={[
             styles.darkSide,
             { top: frameTop, width: frameLeft, height: cropFrameSize },
           ]}
         />
         <View
+          pointerEvents="none"
           style={[
             styles.darkSide,
             {
@@ -188,7 +221,9 @@ export function CropModal({ visible, uri, onSave, onClose }: Props) {
           ]}
         />
 
+        {/* Crop frame corners */}
         <View
+          pointerEvents="none"
           style={[
             styles.cropFrame,
             {
@@ -205,10 +240,15 @@ export function CropModal({ visible, uri, onSave, onClose }: Props) {
           <View style={[styles.corner, styles.cornerBR]} />
         </View>
 
-        <View style={[styles.topBar, { paddingTop: Platform.OS === "web" ? 16 : insets.top + 8 }]}>
+        {/* Top hint */}
+        <View
+          pointerEvents="none"
+          style={[styles.topBar, { paddingTop: Platform.OS === "web" ? 16 : insets.top + 8 }]}
+        >
           <Text style={styles.hint}>Drag to reposition</Text>
         </View>
 
+        {/* Bottom buttons — above gesture layer so they receive taps */}
         <View style={[styles.bottomBar, { paddingBottom: bottomPad }]}>
           <TouchableOpacity onPress={handleCancel} style={styles.btn}>
             <Text style={styles.cancelText}>Cancel</Text>
@@ -231,8 +271,12 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: "#000",
   },
+  gestureLayer: {
+    zIndex: 1,
+  },
   imageWrapper: {
     position: "absolute",
+    zIndex: 0,
   },
   darkTop: {
     position: "absolute",
@@ -240,6 +284,7 @@ const styles = StyleSheet.create({
     left: 0,
     right: 0,
     backgroundColor: "rgba(0,0,0,0.68)",
+    zIndex: 2,
   },
   darkBottom: {
     position: "absolute",
@@ -247,15 +292,18 @@ const styles = StyleSheet.create({
     left: 0,
     right: 0,
     backgroundColor: "rgba(0,0,0,0.68)",
+    zIndex: 2,
   },
   darkSide: {
     position: "absolute",
     backgroundColor: "rgba(0,0,0,0.68)",
+    zIndex: 2,
   },
   cropFrame: {
     position: "absolute",
     borderWidth: 1.5,
     borderColor: "rgba(255,255,255,0.8)",
+    zIndex: 3,
   },
   corner: {
     position: "absolute",
@@ -293,6 +341,7 @@ const styles = StyleSheet.create({
     left: 0,
     right: 0,
     alignItems: "center",
+    zIndex: 4,
   },
   hint: {
     color: "rgba(255,255,255,0.45)",
@@ -310,6 +359,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 28,
     paddingTop: 16,
     backgroundColor: "rgba(0,0,0,0.7)",
+    zIndex: 5,
   },
   btn: {
     paddingVertical: 10,
