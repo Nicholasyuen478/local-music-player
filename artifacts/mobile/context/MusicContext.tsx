@@ -382,7 +382,9 @@ const [MusicContextProvider, useMusicContext] = createContextHook(() => {
       ]);
 
       if (imgFolder) setImageFolderUri(imgFolder);
-      if (savedShuffle) setShuffleEnabled(savedShuffle === "true");
+      // Shuffle is intentionally NOT restored on restart — always boot in
+      // original order with shuffle OFF (like Spotify/YouTube Music cold start).
+      setShuffleEnabled(false);
       if (customFlag === "true") setHasCustomImages(true);
 
       let resolvedPool: string[];
@@ -397,16 +399,31 @@ const [MusicContextProvider, useMusicContext] = createContextHook(() => {
 
       if (cachedSongs) {
         const parsed: Song[] = JSON.parse(cachedSongs);
-        const q: Song[] = savedQueue ? JSON.parse(savedQueue) : parsed;
-        const idx = savedIndex ? parseInt(savedIndex, 10) : 0;
+
+        // Always restore in original (unshuffled) order.
+        // Try to resume from the same song — find it in the original order.
+        const prevQ: Song[] = savedQueue ? JSON.parse(savedQueue) : parsed;
+        const prevIdx = savedIndex ? parseInt(savedIndex, 10) : 0;
+        const prevSong = prevQ[prevIdx] ?? null;
+        const idx = prevSong
+          ? Math.max(0, parsed.findIndex((s) => s.uri === prevSong.uri))
+          : 0;
+
         setSongs(parsed);
-        setQueue(q);
+        setQueue(parsed);
         setCurrentIndex(idx);
 
-        // Pre-build artwork map for the persisted queue
-        artworkMap.current = buildArtworkSequence(q, resolvedPool);
+        // Persist corrected state so next restart also uses original order
+        await AsyncStorage.multiSet([
+          [STORAGE_KEYS.QUEUE, JSON.stringify(parsed)],
+          [STORAGE_KEYS.CURRENT_INDEX, String(idx)],
+          [STORAGE_KEYS.SHUFFLE, "false"],
+        ]);
 
-        const tracks = q.map(songToTrack);
+        // Pre-build artwork map for the original-order queue
+        artworkMap.current = buildArtworkSequence(parsed, resolvedPool);
+
+        const tracks = parsed.map(songToTrack);
         await TrackPlayer.setQueue(tracks);
         if (idx > 0 && idx < tracks.length) await TrackPlayer.skip(idx);
         setIsSetupDone(true);
@@ -640,10 +657,12 @@ const [MusicContextProvider, useMusicContext] = createContextHook(() => {
 
   const cropImageInPool = useCallback(
     async (oldUri: string, newUri: string) => {
-      // Update any artworkMap entries that referenced the old URI
-      artworkMap.current.forEach((v, k) => {
-        if (v === oldUri) artworkMap.current.set(k, newUri);
-      });
+      // Only replace the URI in the pool array — do NOT update artworkMap.
+      // This means the currently displayed artwork stays unchanged after a crop.
+      // The cropped version enters the pool silently; it will appear naturally
+      // when the sequence is rebuilt (next shuffle / next scan / next restart).
+      // Songs that were using the old URI will fall back to a fresh random pick
+      // the next time they play (pool.includes check in the artwork effect fails).
       const next = imagePool.map((u) => (u === oldUri ? newUri : u));
       setImagePool(next);
       await AsyncStorage.setItem(STORAGE_KEYS.IMAGE_POOL, JSON.stringify(next));
