@@ -5,6 +5,8 @@ const { withAndroidManifest, withInfoPlist } = require(
   require.resolve("@expo/config-plugins", { paths: [expoDir] })
 );
 
+const MUSIC_SERVICE = "com.doublesymmetry.trackplayer.service.MusicService";
+
 function addAndroidManifestChanges(androidManifest) {
   const app = androidManifest.manifest.application[0];
 
@@ -12,20 +14,25 @@ function addAndroidManifestChanges(androidManifest) {
     app.service = [];
   }
 
-  const serviceExists = app.service.some(
-    (s) =>
-      s.$?.["android:name"] ===
-      "com.doublesymmetry.trackplayer.service.MusicService",
+  const existing = app.service.find(
+    (s) => s.$?.["android:name"] === MUSIC_SERVICE,
   );
 
-  if (!serviceExists) {
+  if (existing) {
+    // Service already registered (merged from RNTP's AAR manifest).
+    // Just ensure stopWithTask is set so swiping the app from recents
+    // stops playback — matching YouTube Music / most Android music apps.
+    existing.$["android:stopWithTask"] = "true";
+  } else {
     app.service.push({
       $: {
-        "android:name":
-          "com.doublesymmetry.trackplayer.service.MusicService",
+        "android:name": MUSIC_SERVICE,
         "android:enabled": "true",
         "android:exported": "true",
         "android:foregroundServiceType": "mediaPlayback",
+        // Stop the foreground service when the user swipes the app away
+        // from the recents screen (same behaviour as YouTube Music).
+        "android:stopWithTask": "true",
       },
       "intent-filter": [
         {
