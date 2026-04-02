@@ -15,52 +15,38 @@ import * as MediaLibrary from "expo-media-library";
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import { getDefaultArtworkUris } from "@/constants/defaultArtworks";
 
-// ── Artwork helpers ───────────────────────────────────────────────────────────
-
-/**
- * Djb2 hash — deterministic and fast, used for session-stable artwork assignment.
- * Using a different multiplier from stableImageIndex to avoid visual correlation
- * between pool index and song order.
- */
-function artHash(str: string, mod: number): number {
-  let h = 7919; // prime seed
-  for (let i = 0; i < str.length; i++) {
-    h = ((h * 31) + str.charCodeAt(i)) & 0x7fffffff;
-  }
-  return h % mod;
-}
-
-/**
- * Pick an artwork URI for a song using the standard music-app pooled-art pattern:
- *  1. If pendingNew URIs exist (user just added images), prefer those — pick the
- *     LAST one in the batch (most recently added) that isn't the same as lastUri.
- *  2. Otherwise use the full pool, excluding lastUri (no-repeat rule).
- *  3. Fall back to full pool if all candidates equal lastUri (single-image pool).
- */
-function pickArtwork(
-  songId: string,
+// ── Artwork sequence builder ──────────────────────────────────────────────────
+//
+// Walks the queue in order and assigns one image per song.
+// Rules:
+//   • Adjacent songs in the queue are NEVER assigned the same image.
+//   • When songs > images, images repeat freely for non-adjacent songs.
+//   • Pool of 1 image: all songs get that image (no-repeat falls back gracefully).
+//   • Assignment is random per session, so it changes each app restart.
+//
+function buildArtworkSequence(
+  queue: Song[],
   pool: string[],
-  lastUri: string | null,
-  pendingNew: string[],
-): string {
-  const base = pendingNew.length > 0 ? pendingNew : pool;
+): Map<string, string> {
+  const map = new Map<string, string>();
+  if (!pool.length || !queue.length) return map;
 
-  // Filter out the last shown image — no-repeat rule
-  const candidates = base.filter((u) => u !== lastUri);
-  const available = candidates.length > 0 ? candidates : base;
+  let lastUri: string | null = null;
 
-  if (pendingNew.length > 0) {
-    // Prefer the last image in the newly added batch (most recently added)
-    for (let i = available.length - 1; i >= 0; i--) {
-      if (available[i] !== lastUri) return available[i];
-    }
-    return available[available.length - 1];
+  for (const song of queue) {
+    // Exclude the last assigned image so adjacent songs differ
+    const candidates = pool.filter((u) => u !== lastUri);
+    // If only 1 image in pool, candidates will be empty — fall back to full pool
+    const available = candidates.length > 0 ? candidates : pool;
+    const picked = available[Math.floor(Math.random() * available.length)];
+    map.set(song.id, picked);
+    lastUri = picked;
   }
 
-  // Session-stable deterministic pick from available candidates
-  return available[artHash(songId, available.length)];
+  return map;
 }
 
+// Keep the export for any legacy import — no longer used for in-app picking
 export function stableImageIndex(id: string, poolSize: number): number {
   if (poolSize === 0) return 0;
   let h = 5381;
@@ -70,6 +56,8 @@ export function stableImageIndex(id: string, poolSize: number): number {
   return h % poolSize;
 }
 
+// ── Types ─────────────────────────────────────────────────────────────────────
+
 export type Song = {
   id: string;
   title: string;
@@ -78,6 +66,8 @@ export type Song = {
   filename: string;
   duration?: number;
 };
+
+// ── Constants ─────────────────────────────────────────────────────────────────
 
 const STORAGE_KEYS = {
   SONGS: "cached_songs",
@@ -114,15 +104,16 @@ const SKIP_FILENAME_PATTERNS = [
 
 const MIN_DURATION_SECS = 60;
 
-// ── iTunes artwork cache ───────────────────────────────────────────────────────
-const _artworkCache = new Map<string, string | null>();
+// ── iTunes lock-screen artwork cache ─────────────────────────────────────────
+
+const _itunesCache = new Map<string, string | null>();
 
 async function fetchItunesArtwork(
   title: string,
   artist: string,
 ): Promise<string | undefined> {
-  const cacheKey = `${title.toLowerCase()}::${artist.toLowerCase()}`;
-  if (_artworkCache.has(cacheKey)) return _artworkCache.get(cacheKey) ?? undefined;
+  const key = `${title.toLowerCase()}::${artist.toLowerCase()}`;
+  if (_itunesCache.has(key)) return _itunesCache.get(key) ?? undefined;
   try {
     const q = encodeURIComponent(`${title} ${artist}`);
     const res = await fetch(
@@ -132,13 +123,15 @@ async function fetchItunesArtwork(
     const json = await res.json();
     const raw: string | undefined = json?.results?.[0]?.artworkUrl100;
     const url = raw ? raw.replace("100x100bb", "600x600bb") : null;
-    _artworkCache.set(cacheKey, url);
+    _itunesCache.set(key, url);
     return url ?? undefined;
   } catch {
-    _artworkCache.set(cacheKey, null);
+    _itunesCache.set(key, null);
     return undefined;
   }
 }
+
+// ── Song / audio helpers ──────────────────────────────────────────────────────
 
 function parseSongMeta(filename: string, uri: string, duration?: number): Song {
   const nameWithoutExt = filename.replace(/\.[^/.]+$/, "");
@@ -215,9 +208,10 @@ function songToTrack(song: Song): Track {
     title: song.title,
     artist: song.artist,
     duration: song.duration,
-    // artwork fetched from iTunes and injected via updateNowPlayingMetadata
   };
 }
+
+// ── TrackPlayer setup ─────────────────────────────────────────────────────────
 
 let playerSetup = false;
 
@@ -249,6 +243,8 @@ async function setupPlayer() {
   }
 }
 
+// ── Context ───────────────────────────────────────────────────────────────────
+
 const [MusicContextProvider, useMusicContext] = createContextHook(() => {
   const [songs, setSongs] = useState<Song[]>([]);
   const [queue, setQueue] = useState<Song[]>([]);
@@ -261,19 +257,20 @@ const [MusicContextProvider, useMusicContext] = createContextHook(() => {
   const [hasCustomImages, setHasCustomImages] = useState(false);
   const [isPlayerReady, setIsPlayerReady] = useState(false);
 
-  // ── Artwork state ─────────────────────────────────────────────────────────
+  // ── Artwork tracking ──────────────────────────────────────────────────────
   const [currentArtworkUri, setCurrentArtworkUri] = useState<string | null>(null);
-  // songId → assigned artwork URI — stable within a session
+
+  // Full session map: songId → image URI, built once per queue-establishment.
+  // Built upfront in queue order so adjacent-song no-repeat is guaranteed
+  // structurally, not just reactively.
   const artworkMap = useRef(new Map<string, string>());
-  // URI that was last shown — used for the no-repeat rule
-  const lastArtworkUri = useRef<string | null>(null);
-  // URIs added by the user this session — prioritised for the next pick
+
+  // URIs added in the current picker session — consumed once to prioritise
+  // showing fresh images immediately after the user adds them.
   const pendingNewUris = useRef<string[]>([]);
 
   const imagePoolRef = useRef<string[]>([]);
-  useEffect(() => {
-    imagePoolRef.current = imagePool;
-  }, [imagePool]);
+  useEffect(() => { imagePoolRef.current = imagePool; }, [imagePool]);
 
   const artworkFetchedFor = useRef<string>("");
 
@@ -296,7 +293,16 @@ const [MusicContextProvider, useMusicContext] = createContextHook(() => {
     loadPersistedData();
   }, [isPlayerReady]);
 
-  // ── Artwork selection — runs whenever current song or image pool changes ──
+  // ── Artwork display — fires when current song changes ──────────────────────
+  //
+  // Strategy:
+  //   1. If pendingNewUris exist (user just added images), pick the LAST image
+  //      in the new batch for the current song immediately (most recently added
+  //      image gets shown first). Then clear pendingNewUris.
+  //   2. Otherwise look up the pre-built artworkMap (O(1)).
+  //   3. If not in map (e.g. removed + re-added), fall back to random pick
+  //      excluding the last shown image.
+  //
   useEffect(() => {
     const pool = imagePoolRef.current;
     if (!pool.length || !currentSong) {
@@ -304,33 +310,59 @@ const [MusicContextProvider, useMusicContext] = createContextHook(() => {
       return;
     }
 
-    const { id: songId } = currentSong;
+    const songId = currentSong.id;
     const pending = pendingNewUris.current;
 
     if (pending.length > 0) {
-      // Consume the pending batch — force re-assignment for this song
+      // Consume pending batch — pick the last (most recently added) that differs
+      // from whatever was just showing.
       pendingNewUris.current = [];
-      artworkMap.current.delete(songId);
-    }
-
-    // Re-use existing assignment if it's still valid and different from lastUri
-    const existing = artworkMap.current.get(songId);
-    if (
-      existing &&
-      existing !== lastArtworkUri.current &&
-      pool.includes(existing)
-    ) {
-      lastArtworkUri.current = existing;
-      setCurrentArtworkUri(existing);
+      const last = artworkMap.current.get(songId) ?? null;
+      const candidates = pending.filter((u) => u !== last);
+      const picked = candidates.length > 0
+        ? candidates[candidates.length - 1]   // last = most recently added
+        : pending[pending.length - 1];
+      artworkMap.current.set(songId, picked);
+      setCurrentArtworkUri(picked);
       return;
     }
 
-    // Pick a new image for this song
-    const picked = pickArtwork(songId, pool, lastArtworkUri.current, pending);
+    // Normal path: look up pre-built map
+    const assigned = artworkMap.current.get(songId);
+    if (assigned && pool.includes(assigned)) {
+      setCurrentArtworkUri(assigned);
+      return;
+    }
+
+    // Fallback: song not yet in map or its image was removed.
+    // Pick randomly, avoiding the image that the *previous* song in the queue had.
+    const prevSong = queue[currentIndex - 1] ?? null;
+    const prevUri = prevSong ? artworkMap.current.get(prevSong.id) ?? null : null;
+    const candidates = pool.filter((u) => u !== prevUri);
+    const available = candidates.length > 0 ? candidates : pool;
+    const picked = available[Math.floor(Math.random() * available.length)];
     artworkMap.current.set(songId, picked);
-    lastArtworkUri.current = picked;
     setCurrentArtworkUri(picked);
   }, [currentSong?.id, imagePool]);
+
+  // ── Sync active track index + fetch lock-screen artwork ───────────────────
+  useEffect(() => {
+    if (!activeTrack?.id || queue.length === 0) return;
+    const idx = queue.findIndex((s) => s.id === activeTrack.id);
+    if (idx >= 0 && idx !== currentIndex) {
+      setCurrentIndex(idx);
+      AsyncStorage.setItem(STORAGE_KEYS.CURRENT_INDEX, String(idx));
+    }
+    const song = idx >= 0 ? queue[idx] : null;
+    if (song && artworkFetchedFor.current !== song.id) {
+      artworkFetchedFor.current = song.id;
+      fetchItunesArtwork(song.title, song.artist)
+        .then((url) => {
+          if (url) TrackPlayer.updateNowPlayingMetadata({ artwork: url }).catch(() => {});
+        })
+        .catch(() => {});
+    }
+  }, [activeTrack?.id]);
 
   // ── Load persisted data ───────────────────────────────────────────────────
   async function loadPersistedData() {
@@ -353,15 +385,15 @@ const [MusicContextProvider, useMusicContext] = createContextHook(() => {
       if (savedShuffle) setShuffleEnabled(savedShuffle === "true");
       if (customFlag === "true") setHasCustomImages(true);
 
+      let resolvedPool: string[];
       if (pool) {
-        const parsed = JSON.parse(pool) as string[];
-        imagePoolRef.current = parsed;
-        setImagePool(parsed);
+        resolvedPool = JSON.parse(pool) as string[];
       } else {
-        const defaults = await getDefaultArtworkUris();
-        imagePoolRef.current = defaults;
-        setImagePool(defaults);
+        resolvedPool = await getDefaultArtworkUris();
+        await AsyncStorage.setItem(STORAGE_KEYS.IMAGE_POOL, JSON.stringify(resolvedPool));
       }
+      imagePoolRef.current = resolvedPool;
+      setImagePool(resolvedPool);
 
       if (cachedSongs) {
         const parsed: Song[] = JSON.parse(cachedSongs);
@@ -370,6 +402,10 @@ const [MusicContextProvider, useMusicContext] = createContextHook(() => {
         setSongs(parsed);
         setQueue(q);
         setCurrentIndex(idx);
+
+        // Pre-build artwork map for the persisted queue
+        artworkMap.current = buildArtworkSequence(q, resolvedPool);
+
         const tracks = q.map(songToTrack);
         await TrackPlayer.setQueue(tracks);
         if (idx > 0 && idx < tracks.length) await TrackPlayer.skip(idx);
@@ -381,25 +417,6 @@ const [MusicContextProvider, useMusicContext] = createContextHook(() => {
       setIsLoading(false);
     }
   }
-
-  // ── Active track changed — sync index + fetch lock-screen artwork ─────────
-  useEffect(() => {
-    if (!activeTrack?.id || queue.length === 0) return;
-    const idx = queue.findIndex((s) => s.id === activeTrack.id);
-    if (idx >= 0 && idx !== currentIndex) {
-      setCurrentIndex(idx);
-      AsyncStorage.setItem(STORAGE_KEYS.CURRENT_INDEX, String(idx));
-    }
-    const song = idx >= 0 ? queue[idx] : null;
-    if (song && artworkFetchedFor.current !== song.id) {
-      artworkFetchedFor.current = song.id;
-      fetchItunesArtwork(song.title, song.artist)
-        .then((url) => {
-          if (url) TrackPlayer.updateNowPlayingMetadata({ artwork: url }).catch(() => {});
-        })
-        .catch(() => {});
-    }
-  }, [activeTrack?.id]);
 
   // ── Scan device music ─────────────────────────────────────────────────────
   const scanDeviceMusic = useCallback(async (): Promise<boolean> => {
@@ -418,17 +435,15 @@ const [MusicContextProvider, useMusicContext] = createContextHook(() => {
         AsyncStorage.setItem(STORAGE_KEYS.QUEUE, JSON.stringify(merged));
         return merged;
       });
+      await new Promise<void>((r) => setTimeout(r, 50));
 
-      await new Promise<void>((resolve) => setTimeout(resolve, 50));
+      // Pre-build artwork sequence for the full merged queue
+      artworkMap.current = buildArtworkSequence(merged, imagePoolRef.current);
 
       const tracks = merged.map(songToTrack);
       await TrackPlayer.setQueue(tracks);
       setQueue(merged);
       setCurrentIndex(0);
-
-      // Reset shuffle OFF, reset artwork assignment, then auto-play
-      artworkMap.current.clear();
-      lastArtworkUri.current = null;
       setShuffleEnabled(false);
 
       await AsyncStorage.multiSet([
@@ -437,10 +452,7 @@ const [MusicContextProvider, useMusicContext] = createContextHook(() => {
       ]);
 
       setIsSetupDone(true);
-
-      // Auto-play immediately after library is ready
       await TrackPlayer.play();
-
       return true;
     } catch (e) {
       console.error("scanDeviceMusic error", e);
@@ -456,7 +468,7 @@ const [MusicContextProvider, useMusicContext] = createContextHook(() => {
       const idSet = new Set(ids);
       const newSongs = songs.filter((s) => !idSet.has(s.id));
       const newQueue = queue.filter((s) => !idSet.has(s.id));
-      let newIdx = idSet.has(currentSong?.id ?? "")
+      const newIdx = idSet.has(currentSong?.id ?? "")
         ? 0
         : Math.max(0, newQueue.findIndex((s) => s.id === currentSong?.id));
 
@@ -467,7 +479,6 @@ const [MusicContextProvider, useMusicContext] = createContextHook(() => {
       if (newSongs.length === 0) {
         setIsSetupDone(false);
         artworkMap.current.clear();
-        lastArtworkUri.current = null;
         await TrackPlayer.reset();
         await Promise.all([
           AsyncStorage.removeItem(STORAGE_KEYS.SONGS),
@@ -499,7 +510,6 @@ const [MusicContextProvider, useMusicContext] = createContextHook(() => {
       AsyncStorage.setItem(STORAGE_KEYS.SHUFFLE, "false"),
     ]);
     artworkMap.current.clear();
-    lastArtworkUri.current = null;
     setIsSetupDone(false);
     setSongs([]);
     setQueue([]);
@@ -532,6 +542,7 @@ const [MusicContextProvider, useMusicContext] = createContextHook(() => {
     [queue],
   );
 
+  // ── Playback controls ─────────────────────────────────────────────────────
   const togglePlayPause = useCallback(async () => {
     if (isPlaying) await TrackPlayer.pause();
     else await TrackPlayer.play();
@@ -553,8 +564,13 @@ const [MusicContextProvider, useMusicContext] = createContextHook(() => {
     const next = !shuffleEnabled;
     setShuffleEnabled(next);
     await AsyncStorage.setItem(STORAGE_KEYS.SHUFFLE, String(next));
+
     const newOrder = next ? shuffleArray(songs) : [...songs];
     const newIdx = Math.max(0, newOrder.findIndex((s) => s.id === currentSong?.id));
+
+    // Rebuild artwork sequence for the new queue order
+    artworkMap.current = buildArtworkSequence(newOrder, imagePoolRef.current);
+
     await TrackPlayer.setQueue(newOrder.map(songToTrack));
     if (newIdx > 0) await TrackPlayer.skip(newIdx);
     setQueue(newOrder);
@@ -567,13 +583,27 @@ const [MusicContextProvider, useMusicContext] = createContextHook(() => {
   }, []);
 
   // ── Image pool management ─────────────────────────────────────────────────
+
   const addImagesToPool = useCallback(
     async (uris: string[], isCustom = true) => {
       const next = [...new Set([...imagePool, ...uris])];
-      // Mark these as pending — they'll be prioritised for the next artwork pick
+
+      // Mark as pending so the artwork effect shows the latest added image
+      // immediately for the current song (before the next queue rebuild).
       pendingNewUris.current = uris;
-      // Clear current song's assignment so it gets one of the new images immediately
+      // Remove current song from map so the effect picks from pendingNewUris
       if (currentSong) artworkMap.current.delete(currentSong.id);
+
+      // Rebuild the full sequence with the expanded pool so future songs also
+      // benefit from the new images (non-current songs get re-assigned).
+      const updatedQueue = queue; // capture current queue
+      // Delay rebuilding until after state update so imagePoolRef is current
+      setTimeout(() => {
+        artworkMap.current = buildArtworkSequence(updatedQueue, next);
+        // Re-delete current song so pendingNewUris logic in useEffect wins
+        if (currentSong) artworkMap.current.delete(currentSong.id);
+      }, 0);
+
       setImagePool(next);
       await AsyncStorage.setItem(STORAGE_KEYS.IMAGE_POOL, JSON.stringify(next));
       if (isCustom) {
@@ -581,14 +611,15 @@ const [MusicContextProvider, useMusicContext] = createContextHook(() => {
         await AsyncStorage.setItem(STORAGE_KEYS.IMAGE_POOL_CUSTOM, "true");
       }
     },
-    [imagePool, currentSong],
+    [imagePool, currentSong, queue],
   );
 
   const removeImageFromPool = useCallback(
     async (uri: string) => {
-      // Evict any artwork assignments that used this URI
-      artworkMap.current.forEach((v, k) => { if (v === uri) artworkMap.current.delete(k); });
-      if (lastArtworkUri.current === uri) lastArtworkUri.current = null;
+      // Evict songs that were assigned this image — they'll be re-picked lazily
+      artworkMap.current.forEach((v, k) => {
+        if (v === uri) artworkMap.current.delete(k);
+      });
       const next = imagePool.filter((u) => u !== uri);
       setImagePool(next);
       await AsyncStorage.setItem(STORAGE_KEYS.IMAGE_POOL, JSON.stringify(next));
@@ -609,11 +640,10 @@ const [MusicContextProvider, useMusicContext] = createContextHook(() => {
 
   const cropImageInPool = useCallback(
     async (oldUri: string, newUri: string) => {
-      // If the cropped image was assigned to any song, re-assign with new URI
+      // Update any artworkMap entries that referenced the old URI
       artworkMap.current.forEach((v, k) => {
         if (v === oldUri) artworkMap.current.set(k, newUri);
       });
-      if (lastArtworkUri.current === oldUri) lastArtworkUri.current = newUri;
       const next = imagePool.map((u) => (u === oldUri ? newUri : u));
       setImagePool(next);
       await AsyncStorage.setItem(STORAGE_KEYS.IMAGE_POOL, JSON.stringify(next));
