@@ -1,11 +1,9 @@
 import * as Haptics from "expo-haptics";
 import { ImageManipulator, SaveFormat } from "expo-image-manipulator";
-import React, { useRef, useState, useCallback, useMemo } from "react";
+import React, { useCallback, useMemo, useRef, useState } from "react";
 import {
-  Animated,
   Image,
   Modal,
-  PanResponder,
   Platform,
   StyleSheet,
   Text,
@@ -13,6 +11,11 @@ import {
   View,
   useWindowDimensions,
 } from "react-native";
+import { Gesture, GestureDetector, GestureHandlerRootView } from "react-native-gesture-handler";
+import Animated, {
+  useAnimatedStyle,
+  useSharedValue,
+} from "react-native-reanimated";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 const CROP_FRAME_PADDING = 40;
@@ -30,11 +33,12 @@ export function CropModal({ visible, uri, onSave, onClose }: Props) {
   const [imageNaturalSize, setImageNaturalSize] = useState({ w: 1, h: 1 });
   const [isSaving, setIsSaving] = useState(false);
 
+  // ── Crop frame geometry (fixed, screen-centered square) ───────────────
   const cropFrameSize = width - CROP_FRAME_PADDING * 2;
   const frameLeft = CROP_FRAME_PADDING;
   const frameTop = (height - cropFrameSize) / 2;
 
-  // Memoised layout — recomputed whenever image dimensions or screen size change
+  // ── Image display geometry ────────────────────────────────────────────
   const layout = useMemo(() => {
     const aspect = imageNaturalSize.w / imageNaturalSize.h;
     let dispW = width;
@@ -43,83 +47,83 @@ export function CropModal({ visible, uri, onSave, onClose }: Props) {
       dispH = height;
       dispW = height * aspect;
     }
-    const imgLeft = (width - dispW) / 2;
-    const imgTop = (height - dispH) / 2;
-    return { dispW, dispH, imgLeft, imgTop };
+    return {
+      dispW,
+      dispH,
+      imgLeft: (width - dispW) / 2,
+      imgTop: (height - dispH) / 2,
+    };
   }, [imageNaturalSize, width, height]);
 
-  // Refs so the PanResponder closure always reads the latest layout values
-  const dispWRef = useRef(layout.dispW);
-  const dispHRef = useRef(layout.dispH);
-  const imgLeftRef = useRef(layout.imgLeft);
-  const imgTopRef = useRef(layout.imgTop);
+  // Keep a ref so handleDone can always read the latest layout
+  const layoutRef = useRef(layout);
+  layoutRef.current = layout;
 
-  // Keep refs in sync with memoised layout on every render
-  dispWRef.current = layout.dispW;
-  dispHRef.current = layout.dispH;
-  imgLeftRef.current = layout.imgLeft;
-  imgTopRef.current = layout.imgTop;
+  // ── Gesture state (RNGH shared values — run on UI thread) ─────────────
+  const translateX = useSharedValue(0);
+  const translateY = useSharedValue(0);
+  const startX = useSharedValue(0);
+  const startY = useSharedValue(0);
 
-  const panX = useRef(new Animated.Value(0)).current;
-  const panY = useRef(new Animated.Value(0)).current;
-  const currentPanX = useRef(0);
-  const currentPanY = useRef(0);
-  const offsetX = useRef(0);
-  const offsetY = useRef(0);
+  const panGesture = Gesture.Pan()
+    .onBegin(() => {
+      startX.value = translateX.value;
+      startY.value = translateY.value;
+    })
+    .onUpdate((e) => {
+      translateX.value = startX.value + e.translationX;
+      translateY.value = startY.value + e.translationY;
+    });
 
-  const panResponder = useRef(
-    PanResponder.create({
-      onStartShouldSetPanResponder: () => true,
-      onMoveShouldSetPanResponder: () => true,
-      onPanResponderGrant: () => {
-        offsetX.current = currentPanX.current;
-        offsetY.current = currentPanY.current;
-      },
-      onPanResponderMove: (_, { dx, dy }) => {
-        currentPanX.current = offsetX.current + dx;
-        currentPanY.current = offsetY.current + dy;
-        panX.setValue(currentPanX.current);
-        panY.setValue(currentPanY.current);
-      },
-      onPanResponderRelease: () => {},
-    }),
-  ).current;
+  const imageAnimStyle = useAnimatedStyle(() => ({
+    transform: [
+      { translateX: translateX.value },
+      { translateY: translateY.value },
+    ],
+  }));
 
+  // ── Reset state when the modal opens ─────────────────────────────────
+  const handleShow = useCallback(() => {
+    translateX.value = 0;
+    translateY.value = 0;
+    startX.value = 0;
+    startY.value = 0;
+  }, []);
+
+  // ── Save / crop ───────────────────────────────────────────────────────
   const handleDone = useCallback(async () => {
     if (!uri || isSaving) return;
     setIsSaving(true);
     try {
-      // Read from refs — always fresh even if this callback was closed over stale values
-      const dW = dispWRef.current;
-      const dH = dispHRef.current;
-      const iL = imgLeftRef.current;
-      const iT = imgTopRef.current;
-      const px = currentPanX.current;
-      const py = currentPanY.current;
+      const { dispW, dispH, imgLeft, imgTop } = layoutRef.current;
+      // Read pan offset from shared values (JS-thread read is safe here)
+      const px = translateX.value;
+      const py = translateY.value;
 
-      const naturalW = imageNaturalSize.w;
-      const naturalH = imageNaturalSize.h;
+      const { w: naturalW, h: naturalH } = imageNaturalSize;
 
-      const actualImgLeft = iL + px;
-      const actualImgTop = iT + py;
+      const actualImgLeft = imgLeft + px;
+      const actualImgTop = imgTop + py;
 
-      const scaleX = naturalW / dW;
-      const scaleY = naturalH / dH;
+      const scaleX = naturalW / dispW;
+      const scaleY = naturalH / dispH;
 
       let cropX = (frameLeft - actualImgLeft) * scaleX;
       let cropY = (frameTop - actualImgTop) * scaleY;
       let cropW = cropFrameSize * scaleX;
       let cropH = cropFrameSize * scaleY;
 
+      // Clamp to image bounds
       cropX = Math.max(0, Math.min(cropX, naturalW - 10));
       cropY = Math.max(0, Math.min(cropY, naturalH - 10));
       cropW = Math.max(10, Math.min(cropW, naturalW - cropX));
       cropH = Math.max(10, Math.min(cropH, naturalH - cropY));
 
-      // SDK 52 builder API
-      const context = ImageManipulator.manipulate(uri);
-      context.crop({ originX: cropX, originY: cropY, width: cropW, height: cropH });
-      const imageRef = await context.renderAsync();
+      // ✅ Correct SDK 52 builder API — crop must be CHAINED, not called and discarded
+      const imageRef = await ImageManipulator.manipulate(uri)
+        .crop({ originX: cropX, originY: cropY, width: cropW, height: cropH })
+        .renderAsync();
+
       const saved = await imageRef.saveAsync({
         compress: 0.92,
         format: SaveFormat.JPEG,
@@ -137,10 +141,6 @@ export function CropModal({ visible, uri, onSave, onClose }: Props) {
 
   const handleCancel = useCallback(() => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-    panX.setValue(0);
-    panY.setValue(0);
-    currentPanX.current = 0;
-    currentPanY.current = 0;
     onClose();
   }, [onClose]);
 
@@ -148,143 +148,136 @@ export function CropModal({ visible, uri, onSave, onClose }: Props) {
 
   const { dispW, dispH, imgLeft, imgTop } = layout;
   const bottomPad = Platform.OS === "web" ? 24 : insets.bottom + 16;
+  const topPad = Platform.OS === "web" ? 16 : insets.top + 8;
 
   return (
     <Modal
       visible={visible}
       animationType="fade"
       statusBarTranslucent
-      onShow={() => {
-        panX.setValue(0);
-        panY.setValue(0);
-        currentPanX.current = 0;
-        currentPanY.current = 0;
-      }}
+      onShow={handleShow}
     >
-      <View style={styles.container}>
-        {/* Full-screen gesture catcher — must be behind overlay views but receive touches */}
-        <Animated.View
-          style={[StyleSheet.absoluteFill, styles.gestureLayer]}
-          {...panResponder.panHandlers}
-        />
+      {/*
+        GestureHandlerRootView is required inside Modal because the Modal
+        renders in a separate native window outside the app's root GHRV.
+      */}
+      <GestureHandlerRootView style={styles.root}>
+        <View style={styles.container}>
+          {/* ── Pannable image (gesture covers full screen) ── */}
+          <GestureDetector gesture={panGesture}>
+            <Animated.View style={[StyleSheet.absoluteFill, styles.gestureArea]}>
+              <Animated.View
+                style={[
+                  styles.imageWrapper,
+                  { width: dispW, height: dispH, left: imgLeft, top: imgTop },
+                  imageAnimStyle,
+                ]}
+              >
+                <Image
+                  source={{ uri }}
+                  style={{ width: dispW, height: dispH }}
+                  resizeMode="cover"
+                  onLoad={({ nativeEvent: { source } }) =>
+                    setImageNaturalSize({ w: source.width, h: source.height })
+                  }
+                />
+              </Animated.View>
+            </Animated.View>
+          </GestureDetector>
 
-        {/* The image moves with pan */}
-        <Animated.View
-          pointerEvents="none"
-          style={[
-            styles.imageWrapper,
-            {
-              width: dispW,
-              height: dispH,
-              left: imgLeft,
-              top: imgTop,
-              transform: [{ translateX: panX }, { translateY: panY }],
-            },
-          ]}
-        >
-          <Image
-            source={{ uri }}
-            style={{ width: dispW, height: dispH }}
-            resizeMode="cover"
-            onLoad={({ nativeEvent: { source } }) =>
-              setImageNaturalSize({ w: source.width, h: source.height })
-            }
+          {/* ── Dark overlay quadrants (non-interactive) ── */}
+          <View
+            pointerEvents="none"
+            style={[styles.darkTop, { height: frameTop }]}
           />
-        </Animated.View>
+          <View
+            pointerEvents="none"
+            style={[styles.darkBottom, { top: frameTop + cropFrameSize }]}
+          />
+          <View
+            pointerEvents="none"
+            style={[
+              styles.darkSide,
+              { top: frameTop, width: frameLeft, height: cropFrameSize },
+            ]}
+          />
+          <View
+            pointerEvents="none"
+            style={[
+              styles.darkSide,
+              {
+                top: frameTop,
+                left: frameLeft + cropFrameSize,
+                right: 0,
+                height: cropFrameSize,
+              },
+            ]}
+          />
 
-        {/* Dark overlay quadrants */}
-        <View
-          pointerEvents="none"
-          style={[styles.darkTop, { height: frameTop }]}
-        />
-        <View
-          pointerEvents="none"
-          style={[styles.darkBottom, { top: frameTop + cropFrameSize }]}
-        />
-        <View
-          pointerEvents="none"
-          style={[
-            styles.darkSide,
-            { top: frameTop, width: frameLeft, height: cropFrameSize },
-          ]}
-        />
-        <View
-          pointerEvents="none"
-          style={[
-            styles.darkSide,
-            {
-              top: frameTop,
-              left: frameLeft + cropFrameSize,
-              right: 0,
-              height: cropFrameSize,
-            },
-          ]}
-        />
-
-        {/* Crop frame corners */}
-        <View
-          pointerEvents="none"
-          style={[
-            styles.cropFrame,
-            {
-              top: frameTop,
-              left: frameLeft,
-              width: cropFrameSize,
-              height: cropFrameSize,
-            },
-          ]}
-        >
-          <View style={[styles.corner, styles.cornerTL]} />
-          <View style={[styles.corner, styles.cornerTR]} />
-          <View style={[styles.corner, styles.cornerBL]} />
-          <View style={[styles.corner, styles.cornerBR]} />
-        </View>
-
-        {/* Top hint */}
-        <View
-          pointerEvents="none"
-          style={[styles.topBar, { paddingTop: Platform.OS === "web" ? 16 : insets.top + 8 }]}
-        >
-          <Text style={styles.hint}>Drag to reposition</Text>
-        </View>
-
-        {/* Bottom buttons — above gesture layer so they receive taps */}
-        <View style={[styles.bottomBar, { paddingBottom: bottomPad }]}>
-          <TouchableOpacity onPress={handleCancel} style={styles.btn}>
-            <Text style={styles.cancelText}>Cancel</Text>
-          </TouchableOpacity>
-          <TouchableOpacity
-            onPress={handleDone}
-            style={[styles.btn, styles.doneBtn, isSaving && styles.btnDisabled]}
-            disabled={isSaving}
+          {/* ── Crop frame ── */}
+          <View
+            pointerEvents="none"
+            style={[
+              styles.cropFrame,
+              {
+                top: frameTop,
+                left: frameLeft,
+                width: cropFrameSize,
+                height: cropFrameSize,
+              },
+            ]}
           >
-            <Text style={styles.doneText}>{isSaving ? "Saving…" : "Done"}</Text>
-          </TouchableOpacity>
+            <View style={[styles.corner, styles.cornerTL]} />
+            <View style={[styles.corner, styles.cornerTR]} />
+            <View style={[styles.corner, styles.cornerBL]} />
+            <View style={[styles.corner, styles.cornerBR]} />
+          </View>
+
+          {/* ── Hint text ── */}
+          <View
+            pointerEvents="none"
+            style={[styles.topBar, { paddingTop: topPad }]}
+          >
+            <Text style={styles.hint}>Drag to reposition</Text>
+          </View>
+
+          {/* ── Action buttons — rendered OUTSIDE GestureDetector, get taps reliably ── */}
+          <View style={[styles.bottomBar, { paddingBottom: bottomPad }]}>
+            <TouchableOpacity
+              onPress={handleCancel}
+              style={styles.btn}
+              hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
+            >
+              <Text style={styles.cancelText}>Cancel</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              onPress={handleDone}
+              style={[styles.btn, styles.doneBtn, isSaving && styles.btnDisabled]}
+              disabled={isSaving}
+              hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
+            >
+              <Text style={styles.doneText}>{isSaving ? "Saving…" : "Done"}</Text>
+            </TouchableOpacity>
+          </View>
         </View>
-      </View>
+      </GestureHandlerRootView>
     </Modal>
   );
 }
 
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: "#000",
-  },
-  gestureLayer: {
-    zIndex: 1,
-  },
-  imageWrapper: {
-    position: "absolute",
-    zIndex: 0,
-  },
+  root: { flex: 1 },
+  container: { flex: 1, backgroundColor: "#000" },
+  gestureArea: { zIndex: 0 },
+  imageWrapper: { position: "absolute" },
   darkTop: {
     position: "absolute",
     top: 0,
     left: 0,
     right: 0,
     backgroundColor: "rgba(0,0,0,0.68)",
-    zIndex: 2,
+    zIndex: 1,
+    pointerEvents: "none",
   },
   darkBottom: {
     position: "absolute",
@@ -292,18 +285,18 @@ const styles = StyleSheet.create({
     left: 0,
     right: 0,
     backgroundColor: "rgba(0,0,0,0.68)",
-    zIndex: 2,
+    zIndex: 1,
   },
   darkSide: {
     position: "absolute",
     backgroundColor: "rgba(0,0,0,0.68)",
-    zIndex: 2,
+    zIndex: 1,
   },
   cropFrame: {
     position: "absolute",
     borderWidth: 1.5,
     borderColor: "rgba(255,255,255,0.8)",
-    zIndex: 3,
+    zIndex: 2,
   },
   corner: {
     position: "absolute",
@@ -341,7 +334,7 @@ const styles = StyleSheet.create({
     left: 0,
     right: 0,
     alignItems: "center",
-    zIndex: 4,
+    zIndex: 3,
   },
   hint: {
     color: "rgba(255,255,255,0.45)",
@@ -359,7 +352,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 28,
     paddingTop: 16,
     backgroundColor: "rgba(0,0,0,0.7)",
-    zIndex: 5,
+    zIndex: 3,
   },
   btn: {
     paddingVertical: 10,

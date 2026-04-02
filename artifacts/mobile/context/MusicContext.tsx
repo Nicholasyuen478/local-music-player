@@ -43,7 +43,7 @@ const STORAGE_KEYS = {
   SHUFFLE: "shuffle_enabled",
 };
 
-const AUDIO_EXTENSIONS = [
+const AUDIO_EXTENSIONS = new Set([
   ".mp3",
   ".m4a",
   ".aac",
@@ -52,8 +52,16 @@ const AUDIO_EXTENSIONS = [
   ".wav",
   ".opus",
   ".wma",
-];
+  ".ape",
+  ".alac",
+  ".dsf",
+  ".dsd",
+]);
 
+/**
+ * Path fragments that indicate system / UI / non-music audio.
+ * Matched case-insensitively against the full URI.
+ */
 const SKIP_PATH_FRAGMENTS = [
   "/ringtones/",
   "/ringtone/",
@@ -67,9 +75,48 @@ const SKIP_PATH_FRAGMENTS = [
   "com.android",
   "/soundfx/",
   "/ui/",
+  "/voice_memo",
+  "/voicerecord",
+  "/audiorecord",
+  "/whatsapp/",
+  "/telegram/",
+  "/viber/",
+  "/line/",
+  "/signal/",
+  "/zedge/",
+  "/soundboard",
+  "/callrecord",
+  "/call_record",
+  "/recorder/",
+  "/.trash",
+  "/.nomedia",
 ];
 
-const MIN_DURATION_SECS = 30;
+/**
+ * Filename patterns (without extension) that are typical of non-music files.
+ * Matched case-insensitively.
+ */
+const SKIP_FILENAME_PATTERNS = [
+  /^notification[_\s-]/i,
+  /^alarm[_\s-]/i,
+  /^ringtone[_\s-]/i,
+  /^rington[_\s-]/i,
+  /^tone[_\s-]/i,
+  /^alert[_\s-]/i,
+  /^msg[_\s-]/i,
+  /^sms[_\s-]/i,
+  /^beep/i,
+  /^click/i,
+  /^error\d*/i,
+  /^dtmf/i,
+  /^silence/i,
+];
+
+/**
+ * Minimum track length to be treated as a music file.
+ * Filters out sound effects, notification sounds, short jingles, etc.
+ */
+const MIN_DURATION_SECS = 60;
 
 function parseSongMeta(filename: string, uri: string, duration?: number): Song {
   const nameWithoutExt = filename.replace(/\.[^/.]+$/, "");
@@ -109,13 +156,21 @@ async function scanDeviceAudio(): Promise<Song[]> {
     });
 
     for (const asset of page.assets) {
+      // 1. Duration gate — skip short clips, sound effects, jingles
       if ((asset.duration ?? 0) < MIN_DURATION_SECS) continue;
 
+      // 2. Path gate — skip system / messaging-app / recorder paths
       const uriLower = asset.uri.toLowerCase();
       if (SKIP_PATH_FRAGMENTS.some((frag) => uriLower.includes(frag))) continue;
 
+      // 3. Extension gate — only known audio containers
       const fn = asset.filename.toLowerCase();
-      if (!AUDIO_EXTENSIONS.some((ext) => fn.endsWith(ext))) continue;
+      const dotIdx = fn.lastIndexOf(".");
+      if (dotIdx < 0 || !AUDIO_EXTENSIONS.has(fn.slice(dotIdx))) continue;
+
+      // 4. Filename pattern gate — skip obvious non-music names
+      const nameNoExt = fn.slice(0, dotIdx);
+      if (SKIP_FILENAME_PATTERNS.some((re) => re.test(nameNoExt))) continue;
 
       songs.push(parseSongMeta(asset.filename, asset.uri, asset.duration));
     }
