@@ -8,7 +8,7 @@ import {
   SkipForward,
   Trash2,
 } from "lucide-react-native";
-import React, { useState, useCallback, useRef, useEffect } from "react";
+import React, { useState, useCallback, useRef } from "react";
 import {
   Alert,
   Animated,
@@ -39,15 +39,14 @@ export default function PlayerScreen() {
   } = useLayout();
 
   const [isScanning, setIsScanning] = useState(false);
-  const hasAutoPlayed = useRef(false);
 
   const {
     currentSong,
+    currentArtworkUri,
     queue,
     songs,
     shuffleEnabled,
     status,
-    imagePool,
     isLoading,
     isSetupDone,
     hasCustomImages,
@@ -68,21 +67,9 @@ export default function PlayerScreen() {
   // ── Stable refs for PanResponder callbacks ────────────────────────────
   const playNextRef = useRef(playNext);
   const playPrevRef = useRef(playPrev);
-
-  useEffect(() => {
-    playNextRef.current = playNext;
-    playPrevRef.current = playPrev;
-  }, [playNext, playPrev]);
-
-  useEffect(() => {
-    if (!isSetupDone || !currentSong || hasAutoPlayed.current) return;
-    if (status.playing) {
-      hasAutoPlayed.current = true;
-      return;
-    }
-    hasAutoPlayed.current = true;
-    togglePlayPause();
-  }, [isSetupDone, currentSong]); // togglePlayPause intentionally omitted
+  // Keep refs in sync every render (no useEffect needed for ref mutation)
+  playNextRef.current = playNext;
+  playPrevRef.current = playPrev;
 
   // ── Helpers ───────────────────────────────────────────────────────────
   function animateSongChange(
@@ -261,8 +248,7 @@ export default function PlayerScreen() {
           {...panResponder.panHandlers}
         >
           <SongArtwork
-            imagePool={imagePool}
-            songId={currentSong?.id}
+            artworkUri={currentArtworkUri}
             size={artSize}
             borderRadius={4}
           />
