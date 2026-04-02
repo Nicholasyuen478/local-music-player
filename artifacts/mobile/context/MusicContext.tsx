@@ -583,17 +583,19 @@ const [MusicContextProvider, useMusicContext] = createContextHook(() => {
     await AsyncStorage.setItem(STORAGE_KEYS.SHUFFLE, String(next));
 
     const newOrder = next ? shuffleArray(songs) : [...songs];
-    const newIdx = Math.max(0, newOrder.findIndex((s) => s.id === currentSong?.id));
 
-    // Rebuild artwork sequence for the new queue order
+    // Always reset to the first song in the new order when toggling shuffle
     artworkMap.current = buildArtworkSequence(newOrder, imagePoolRef.current);
 
     await TrackPlayer.setQueue(newOrder.map(songToTrack));
-    if (newIdx > 0) await TrackPlayer.skip(newIdx);
+    await TrackPlayer.skip(0);
     setQueue(newOrder);
-    setCurrentIndex(newIdx);
-    await AsyncStorage.setItem(STORAGE_KEYS.QUEUE, JSON.stringify(newOrder));
-  }, [shuffleEnabled, songs, currentSong]);
+    setCurrentIndex(0);
+    await AsyncStorage.multiSet([
+      [STORAGE_KEYS.QUEUE, JSON.stringify(newOrder)],
+      [STORAGE_KEYS.CURRENT_INDEX, "0"],
+    ]);
+  }, [shuffleEnabled, songs]);
 
   const seekTo = useCallback(async (secs: number) => {
     await TrackPlayer.seekTo(secs);
