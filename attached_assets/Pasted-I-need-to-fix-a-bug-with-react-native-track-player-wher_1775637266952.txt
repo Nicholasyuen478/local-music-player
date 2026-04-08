@@ -1,0 +1,68 @@
+I need to fix a bug with react-native-track-player where clicking the Android media notification causes the app to crash or navigate to a wrong route. Please apply the following two fixes:
+
+---
+
+## Fix 1: Set Android launchMode to singleTask
+
+In `app.json`, locate the `"android"` section and add `"mainActivity"` with the `launchMode` config plugin. Since Expo managed workflow doesn't support `android:launchMode` directly in `app.json`, create a config plugin file to patch the AndroidManifest.
+
+Create a new file called `android-manifest-plugin.js` in the project root with this content:
+
+```js
+const { withAndroidManifest } = require('@expo/config-plugins');
+
+module.exports = function withSingleTaskLaunchMode(config) {
+  return withAndroidManifest(config, (config) => {
+    const mainActivity = config.modResults.manifest.application.activity.find(
+      (activity) => activity.$['android:name'] === '.MainActivity'
+    );
+    if (mainActivity) {
+      mainActivity.$['android:launchMode'] = 'singleTask';
+    }
+    return config;
+  });
+};
+```
+
+Then in `app.json`, register this plugin under the `"plugins"` array:
+
+```json
+{
+  "expo": {
+    "plugins": [
+      "./android-manifest-plugin.js"
+    ],
+    "android": {
+      "intentFilters": [
+        {
+          "action": "VIEW",
+          "data": [{ "scheme": "trackplayer" }],
+          "category": ["BROWSABLE", "DEFAULT"]
+        }
+      ]
+    }
+  }
+}
+```
+
+> Note: If there is already a `"plugins"` array, just append `"./android-manifest-plugin.js"` to it. If there is already an `"intentFilters"` array inside `"android"`, append the `trackplayer` entry to it rather than replacing.
+
+---
+
+## Fix 2: Add a catch route for the trackplayer deep link (Expo Router)
+
+Create a new file at `app/notification.click.tsx` with this content:
+
+```tsx
+import { Redirect } from 'expo-router';
+
+export default function NotificationClick() {
+  // Redirect to your main player screen instead of showing a 404
+  // Change "/player" to whatever your actual player screen route is
+  return <Redirect href="/player" />;
+}
+```
+
+> If your player screen is at a different route (e.g. `/(tabs)/player`, `/home`, etc.), update the `href` value accordingly.
+
+---

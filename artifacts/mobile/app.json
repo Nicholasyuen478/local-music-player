@@ -23,6 +23,13 @@
     "android": {
       "package": "com.musicplayer.app",
       "versionCode": 1,
+      "intentFilters": [
+        {
+          "action": "VIEW",
+          "data": [{ "scheme": "trackplayer" }],
+          "category": ["BROWSABLE", "DEFAULT"]
+        }
+      ],
       "adaptiveIcon": {
         "foregroundImage": "./assets/images/icon.png",
         "backgroundColor": "#000000"
@@ -50,6 +57,7 @@
           "origin": "https://replit.com/"
         }
       ],
+      "./android-manifest-plugin.js",
       "expo-font",
       "expo-asset",
       "./plugins/withRNTrackPlayer",
