@@ -1,5 +1,6 @@
 import * as Haptics from "expo-haptics";
 import { Check, ListMusic, Music2, Search, X } from "lucide-react-native";
+import { router, useFocusEffect } from "expo-router";
 import React, {
   useCallback,
   useEffect,
@@ -17,7 +18,6 @@ import {
   TouchableOpacity,
   View,
 } from "react-native";
-import { useFocusEffect } from "expo-router";
 import Colors from "@/constants/colors";
 import { useMusicContext } from "@/context/MusicContext";
 import type { Song } from "@/context/MusicContext";
@@ -302,6 +302,17 @@ export default function LibraryScreen() {
                   : ""}
               </Text>
               <View style={styles.headerActions}>
+                {/* Back to Player */}
+                <TouchableOpacity
+                  onPress={() => router.navigate("/(tabs)/")}
+                  style={styles.iconCircle}
+                  hitSlop={8}
+                >
+                  <Music2
+                    size={isCompact ? 15 : 16}
+                    color={currentSong ? Colors.dark.accent : Colors.dark.textSecondary}
+                  />
+                </TouchableOpacity>
                 <TouchableOpacity
                   onPress={openSearch}
                   style={styles.iconCircle}

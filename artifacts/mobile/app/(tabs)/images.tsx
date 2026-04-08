@@ -1,7 +1,8 @@
 import * as Haptics from "expo-haptics";
 import { Image } from "expo-image";
 import * as ImagePicker from "expo-image-picker";
-import { ImageIcon, Plus, Scissors, X } from "lucide-react-native";
+import { router } from "expo-router";
+import { ImageIcon, Music2, Plus, Scissors, X } from "lucide-react-native";
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import {
   ActivityIndicator,
@@ -170,18 +171,28 @@ export default function ImagesScreen() {
         <Text style={styles.headerCount}>
           {imagePool.length > 0 ? `${imagePool.length} images` : "Artwork pool"}
         </Text>
-        <TouchableOpacity
-          style={[styles.addBtn, isAdding && styles.addBtnLoading]}
-          onPress={handlePickFiles}
-          activeOpacity={0.7}
-          disabled={isAdding}
-          hitSlop={8}
-        >
-          {isAdding
-            ? <ActivityIndicator size="small" color="#fff" />
-            : <Plus size={20} color="#fff" />
-          }
-        </TouchableOpacity>
+        <View style={styles.headerRight}>
+          {/* Back to Player */}
+          <TouchableOpacity
+            onPress={() => router.navigate("/(tabs)/")}
+            style={styles.iconCircle}
+            hitSlop={8}
+          >
+            <Music2 size={isCompact ? 15 : 16} color={Colors.dark.textSecondary} />
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={[styles.addBtn, isAdding && styles.addBtnLoading]}
+            onPress={handlePickFiles}
+            activeOpacity={0.7}
+            disabled={isAdding}
+            hitSlop={8}
+          >
+            {isAdding
+              ? <ActivityIndicator size="small" color="#fff" />
+              : <Plus size={20} color="#fff" />
+            }
+          </TouchableOpacity>
+        </View>
       </View>
 
       {imagePool.length === 0 ? (
@@ -271,6 +282,15 @@ const styles = StyleSheet.create({
     fontFamily: "Inter_500Medium",
     letterSpacing: 0.5,
     textTransform: "uppercase",
+  },
+  headerRight: { flexDirection: "row", alignItems: "center", gap: 8 },
+  iconCircle: {
+    width: 34,
+    height: 34,
+    borderRadius: 17,
+    backgroundColor: Colors.dark.surface,
+    alignItems: "center",
+    justifyContent: "center",
   },
   addBtn: {
     width: 38,
