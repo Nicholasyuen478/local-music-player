@@ -2,10 +2,11 @@ import * as Haptics from "expo-haptics";
 import { Image } from "expo-image";
 import * as ImagePicker from "expo-image-picker";
 import { ImageIcon, Plus, Scissors, X } from "lucide-react-native";
-import React, { useCallback, useState } from "react";
+import React, { useCallback, useEffect, useRef, useState } from "react";
 import {
   ActivityIndicator,
   Alert,
+  AppState,
   FlatList,
   StyleSheet,
   Text,
@@ -30,36 +31,77 @@ function isUserPickedUri(uri: string): boolean {
   );
 }
 
-/** Placeholder shown when an image fails to load */
-function FailedThumb({ size }: { size: number }) {
+// ── Per-thumbnail component with retry logic ────────────────────────────────
+// expo-image can fire onError briefly when the app returns from background
+// while the image cache is warming up. We retry once after a short delay
+// before treating the failure as permanent.
+interface ThumbImgProps {
+  uri: string;
+  size: number;
+}
+
+function ThumbImg({ uri, size }: ThumbImgProps) {
+  const [failed, setFailed] = useState(false);
+  const retryRef = useRef(0);
+  // imgKey lets us force a remount (re-fetch) for the retry
+  const [imgKey, setImgKey] = useState(0);
+
+  // When the app returns to foreground, reset failure state so images retry.
+  useEffect(() => {
+    const sub = AppState.addEventListener("change", (nextState) => {
+      if (nextState === "active" && failed) {
+        retryRef.current = 0;
+        setFailed(false);
+        setImgKey((k) => k + 1);
+      }
+    });
+    return () => sub.remove();
+  }, [failed]);
+
+  const handleError = useCallback(() => {
+    if (retryRef.current < 1) {
+      // First failure: wait 1.5 s then retry — avoids false positives on resume
+      retryRef.current += 1;
+      setTimeout(() => setImgKey((k) => k + 1), 1500);
+    } else {
+      // Still failing after retry → show placeholder
+      setFailed(true);
+    }
+  }, []);
+
+  if (failed) {
+    return (
+      <View style={[styles.failedThumb, { width: size, height: size }]}>
+        <ImageIcon size={size * 0.28} color={Colors.dark.textTertiary} />
+        <Text style={styles.failedText}>Not found</Text>
+      </View>
+    );
+  }
+
   return (
-    <View style={[styles.failedThumb, { width: size, height: size }]}>
-      <ImageIcon size={size * 0.3} color={Colors.dark.textTertiary} />
-      <Text style={styles.failedText}>No image</Text>
-    </View>
+    <Image
+      key={imgKey}
+      source={{ uri }}
+      style={styles.thumbImg}
+      contentFit="cover"
+      transition={180}
+      recyclingKey={`${uri}-${imgKey}`}
+      onError={handleError}
+    />
   );
 }
 
+// ── Screen ──────────────────────────────────────────────────────────────────
 export default function ImagesScreen() {
   const { topInset, bottomInset, tabBarH, isCompact } = useLayout();
   const { width } = useWindowDimensions();
   const { imagePool, addImagesToPool, removeImageFromPool, cropImageInPool } =
     useMusicContext();
 
-  // URIs that failed to load — show placeholder instead of blank
-  const [failedUris, setFailedUris] = useState<Set<string>>(new Set());
-
   const thumbSize = Math.floor((width - GAP * (COLUMNS + 1)) / COLUMNS);
 
   const [isAdding,    setIsAdding]    = useState(false);
   const [croppingUri, setCroppingUri] = useState<string | null>(null);
-
-  const markFailed = useCallback((uri: string) => {
-    setFailedUris((prev) => {
-      if (prev.has(uri)) return prev;          // no-op if already failed
-      return new Set([...prev, uri]);
-    });
-  }, []);
 
   const handlePickFiles = async () => {
     setIsAdding(true);
@@ -85,11 +127,10 @@ export default function ImagesScreen() {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
     Alert.alert("Remove image?", undefined, [
       { text: "Cancel", style: "cancel" },
-      { text: "Remove", style: "destructive", onPress: () => {
-          removeImageFromPool(uri);
-          // Also clear from failed set so stale state doesn't persist
-          setFailedUris((prev) => { const n = new Set(prev); n.delete(uri); return n; });
-        },
+      {
+        text: "Remove",
+        style: "destructive",
+        onPress: () => removeImageFromPool(uri),
       },
     ]);
   };
@@ -112,13 +153,13 @@ export default function ImagesScreen() {
         cropperToolbarColor: "#111111",
         cropperToolbarWidgetColor: "#FFFFFF",
       });
-      // Clear failed state for old URI — the new cropped version replaces it
-      setFailedUris((prev) => { const n = new Set(prev); n.delete(uri); return n; });
       await cropImageInPool(uri, result.path);
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
     } catch (e: any) {
       if (e?.code !== "E_PICKER_CANCELLED") console.error("crop error", e);
-    } finally { setCroppingUri(null); }
+    } finally {
+      setCroppingUri(null);
+    }
   }, [cropImageInPool]);
 
   return (
@@ -136,11 +177,10 @@ export default function ImagesScreen() {
           disabled={isAdding}
           hitSlop={8}
         >
-          {isAdding ? (
-            <ActivityIndicator size="small" color="#fff" />
-          ) : (
-            <Plus size={20} color="#fff" />
-          )}
+          {isAdding
+            ? <ActivityIndicator size="small" color="#fff" />
+            : <Plus size={20} color="#fff" />
+          }
         </TouchableOpacity>
       </View>
 
@@ -150,9 +190,7 @@ export default function ImagesScreen() {
             <ImageIcon size={32} color={Colors.dark.accent} />
           </View>
           <Text style={styles.emptyText}>No artwork yet</Text>
-          <Text style={styles.emptyHint}>
-            Tap the + button to add images from your gallery
-          </Text>
+          <Text style={styles.emptyHint}>Tap + to add images from your gallery</Text>
         </View>
       ) : (
         <FlatList
@@ -169,42 +207,24 @@ export default function ImagesScreen() {
           renderItem={({ item }) => {
             const isCropping = croppingUri === item;
             const canCrop    = isUserPickedUri(item);
-            const isFailed   = failedUris.has(item);
 
             return (
-              <View
-                style={[
-                  styles.thumb,
-                  { width: thumbSize, height: thumbSize },
-                ]}
-              >
-                {isFailed ? (
-                  // ── Error placeholder ─────────────────────────────────
-                  <FailedThumb size={thumbSize} />
-                ) : (
-                  // ── Image ──────────────────────────────────────────────
-                  <Image
-                    source={{ uri: item }}
-                    style={styles.thumbImg}
-                    contentFit="cover"
-                    transition={200}
-                    // recyclingKey forces remount when URI changes (e.g. after crop)
-                    recyclingKey={item}
-                    onError={() => markFailed(item)}
-                  />
-                )}
+              <View style={[styles.thumb, { width: thumbSize, height: thumbSize }]}>
 
-                {/* Spinner overlay while cropping THIS image */}
+                {/* Image with per-item retry logic */}
+                <ThumbImg uri={item} size={thumbSize} />
+
+                {/* Cropping spinner overlay */}
                 {isCropping && (
                   <View style={styles.spinnerOverlay}>
                     <ActivityIndicator size="small" color="#fff" />
                   </View>
                 )}
 
-                {/* Crop button — bottom-left — only for user-picked, non-failed images */}
-                {canCrop && !isCropping && !isFailed && (
+                {/* Crop button — bottom-left */}
+                {canCrop && !isCropping && (
                   <TouchableOpacity
-                    style={[styles.overlayBtn, styles.cropBtn]}
+                    style={[styles.overlayBtn, styles.cropBtnPos]}
                     onPress={() => handleCrop(item)}
                     hitSlop={10}
                   >
@@ -214,9 +234,9 @@ export default function ImagesScreen() {
                   </TouchableOpacity>
                 )}
 
-                {/* Remove button — top-right — always shown */}
+                {/* Remove button — top-right */}
                 <TouchableOpacity
-                  style={[styles.overlayBtn, styles.removeBtn]}
+                  style={[styles.overlayBtn, styles.removeBtnPos]}
                   onPress={() => handleRemove(item)}
                   hitSlop={10}
                 >
@@ -270,7 +290,6 @@ const styles = StyleSheet.create({
   },
   thumbImg: { width: "100%", height: "100%" },
 
-  // ── Failed image placeholder ──────────────────────────────────────────
   failedThumb: {
     backgroundColor: Colors.dark.surfaceSecondary,
     alignItems: "center",
@@ -290,8 +309,8 @@ const styles = StyleSheet.create({
     justifyContent: "center",
   },
   overlayBtn: { position: "absolute" },
-  cropBtn:   { bottom: 7, left: 7 },
-  removeBtn: { top: 7, right: 7 },
+  cropBtnPos:   { bottom: 7, left: 7 },
+  removeBtnPos: { top: 7, right: 7 },
   overlayBtnInner: {
     width: 26,
     height: 26,
