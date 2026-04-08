@@ -30,16 +30,36 @@ function isUserPickedUri(uri: string): boolean {
   );
 }
 
+/** Placeholder shown when an image fails to load */
+function FailedThumb({ size }: { size: number }) {
+  return (
+    <View style={[styles.failedThumb, { width: size, height: size }]}>
+      <ImageIcon size={size * 0.3} color={Colors.dark.textTertiary} />
+      <Text style={styles.failedText}>No image</Text>
+    </View>
+  );
+}
+
 export default function ImagesScreen() {
   const { topInset, bottomInset, tabBarH, isCompact } = useLayout();
   const { width } = useWindowDimensions();
   const { imagePool, addImagesToPool, removeImageFromPool, cropImageInPool } =
     useMusicContext();
 
+  // URIs that failed to load — show placeholder instead of blank
+  const [failedUris, setFailedUris] = useState<Set<string>>(new Set());
+
   const thumbSize = Math.floor((width - GAP * (COLUMNS + 1)) / COLUMNS);
 
-  const [isAdding, setIsAdding] = useState(false);
+  const [isAdding,    setIsAdding]    = useState(false);
   const [croppingUri, setCroppingUri] = useState<string | null>(null);
+
+  const markFailed = useCallback((uri: string) => {
+    setFailedUris((prev) => {
+      if (prev.has(uri)) return prev;          // no-op if already failed
+      return new Set([...prev, uri]);
+    });
+  }, []);
 
   const handlePickFiles = async () => {
     setIsAdding(true);
@@ -65,7 +85,12 @@ export default function ImagesScreen() {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
     Alert.alert("Remove image?", undefined, [
       { text: "Cancel", style: "cancel" },
-      { text: "Remove", style: "destructive", onPress: () => removeImageFromPool(uri) },
+      { text: "Remove", style: "destructive", onPress: () => {
+          removeImageFromPool(uri);
+          // Also clear from failed set so stale state doesn't persist
+          setFailedUris((prev) => { const n = new Set(prev); n.delete(uri); return n; });
+        },
+      },
     ]);
   };
 
@@ -87,6 +112,8 @@ export default function ImagesScreen() {
         cropperToolbarColor: "#111111",
         cropperToolbarWidgetColor: "#FFFFFF",
       });
+      // Clear failed state for old URI — the new cropped version replaces it
+      setFailedUris((prev) => { const n = new Set(prev); n.delete(uri); return n; });
       await cropImageInPool(uri, result.path);
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
     } catch (e: any) {
@@ -110,7 +137,7 @@ export default function ImagesScreen() {
           hitSlop={8}
         >
           {isAdding ? (
-            <ActivityIndicator size="small" color={Colors.dark.accent} />
+            <ActivityIndicator size="small" color="#fff" />
           ) : (
             <Plus size={20} color="#fff" />
           )}
@@ -141,24 +168,41 @@ export default function ImagesScreen() {
           columnWrapperStyle={{ gap: GAP }}
           renderItem={({ item }) => {
             const isCropping = croppingUri === item;
-            const canCrop = isUserPickedUri(item);
+            const canCrop    = isUserPickedUri(item);
+            const isFailed   = failedUris.has(item);
 
             return (
-              <View style={[styles.thumb, { width: thumbSize, height: thumbSize }]}>
-                <Image
-                  source={{ uri: item }}
-                  style={styles.thumbImg}
-                  contentFit="cover"
-                  transition={200}
-                />
+              <View
+                style={[
+                  styles.thumb,
+                  { width: thumbSize, height: thumbSize },
+                ]}
+              >
+                {isFailed ? (
+                  // ── Error placeholder ─────────────────────────────────
+                  <FailedThumb size={thumbSize} />
+                ) : (
+                  // ── Image ──────────────────────────────────────────────
+                  <Image
+                    source={{ uri: item }}
+                    style={styles.thumbImg}
+                    contentFit="cover"
+                    transition={200}
+                    // recyclingKey forces remount when URI changes (e.g. after crop)
+                    recyclingKey={item}
+                    onError={() => markFailed(item)}
+                  />
+                )}
 
+                {/* Spinner overlay while cropping THIS image */}
                 {isCropping && (
                   <View style={styles.spinnerOverlay}>
                     <ActivityIndicator size="small" color="#fff" />
                   </View>
                 )}
 
-                {canCrop && !isCropping && (
+                {/* Crop button — bottom-left — only for user-picked, non-failed images */}
+                {canCrop && !isCropping && !isFailed && (
                   <TouchableOpacity
                     style={[styles.overlayBtn, styles.cropBtn]}
                     onPress={() => handleCrop(item)}
@@ -170,6 +214,7 @@ export default function ImagesScreen() {
                   </TouchableOpacity>
                 )}
 
+                {/* Remove button — top-right — always shown */}
                 <TouchableOpacity
                   style={[styles.overlayBtn, styles.removeBtn]}
                   onPress={() => handleRemove(item)}
@@ -215,7 +260,7 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
   },
-  addBtnLoading: { opacity: 0.5 },
+  addBtnLoading: { opacity: 0.55 },
 
   thumb: {
     borderRadius: 10,
@@ -224,6 +269,20 @@ const styles = StyleSheet.create({
     position: "relative",
   },
   thumbImg: { width: "100%", height: "100%" },
+
+  // ── Failed image placeholder ──────────────────────────────────────────
+  failedThumb: {
+    backgroundColor: Colors.dark.surfaceSecondary,
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 6,
+  },
+  failedText: {
+    color: Colors.dark.textTertiary,
+    fontSize: 10,
+    fontFamily: "Inter_400Regular",
+  },
+
   spinnerOverlay: {
     ...StyleSheet.absoluteFillObject,
     backgroundColor: "rgba(0,0,0,0.55)",
@@ -231,7 +290,7 @@ const styles = StyleSheet.create({
     justifyContent: "center",
   },
   overlayBtn: { position: "absolute" },
-  cropBtn: { bottom: 7, left: 7 },
+  cropBtn:   { bottom: 7, left: 7 },
   removeBtn: { top: 7, right: 7 },
   overlayBtnInner: {
     width: 26,

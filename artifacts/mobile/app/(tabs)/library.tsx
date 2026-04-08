@@ -2,6 +2,7 @@ import * as Haptics from "expo-haptics";
 import { Check, ListMusic, Music2, Search, X } from "lucide-react-native";
 import React, {
   useCallback,
+  useEffect,
   useMemo,
   useRef,
   useState,
@@ -9,7 +10,7 @@ import React, {
 import {
   Alert,
   FlatList,
-  PanResponder,
+  ScrollView,
   StyleSheet,
   Text,
   TextInput,
@@ -23,13 +24,11 @@ import type { Song } from "@/context/MusicContext";
 import { useLayout } from "@/hooks/useLayout";
 import QueuePanel from "@/components/QueuePanel";
 
-// ─── Alphabet bar config ────────────────────────────────────────────────────
+// ─── Alphabet config ────────────────────────────────────────────────────────
 const LETTERS = [
   "#","A","B","C","D","E","F","G","H","I","J","K","L",
   "M","N","O","P","Q","R","S","T","U","V","W","X","Y","Z",
 ];
-const STRIP_W   = 26;   // touch-target width on the right edge
-const BUBBLE_SZ = 50;   // floating letter bubble diameter
 
 function firstLetterKey(title: string): string {
   const ch = title.trim()[0]?.toUpperCase() ?? "";
@@ -46,26 +45,24 @@ export default function LibraryScreen() {
     removeSongs,
   } = useMusicContext();
 
-  const [selectedIds, setSelectedIds]   = useState<Set<string>>(new Set());
-  const [selectMode,  setSelectMode]    = useState(false);
-  const [searchText,  setSearchText]    = useState("");
-  const [searchActive, setSearchActive] = useState(false);
-  const [showQueue,   setShowQueue]     = useState(false);
-  const [activeLetter, setActiveLetter] = useState<string | null>(null);
-  const [bubbleY,      setBubbleY]      = useState(0);
+  const [selectedIds,   setSelectedIds]  = useState<Set<string>>(new Set());
+  const [selectMode,    setSelectMode]   = useState(false);
+  const [searchText,    setSearchText]   = useState("");
+  const [searchActive,  setSearchActive] = useState(false);
+  const [showQueue,     setShowQueue]    = useState(false);
+  const [activeLetter,  setActiveLetter] = useState<string | null>(null);
 
-  // Header height — measured via onLayout so the strip starts below the header
-  const [headerH, setHeaderH] = useState(46);
-
-  const listRef        = useRef<FlatList>(null);
-  const isListReady    = useRef(false);
-  const searchRef      = useRef<TextInput>(null);
-  const stripHeightRef = useRef(0);
-  const lastHapticRef  = useRef<string | null>(null);
+  const listRef      = useRef<FlatList>(null);
+  const alphaListRef = useRef<ScrollView>(null);
+  const isListReady  = useRef(false);
+  const searchRef    = useRef<TextInput>(null);
+  const activeTimer  = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const itemH = isCompact ? 56 : 64;
+  const pillH = isCompact ? 32 : 36;
+  const pillW = isCompact ? 28 : 32;
 
-  // ── Filtered songs ────────────────────────────────────────────────────────
+  // ── Filtered songs ──────────────────────────────────────────────────────
   const displayedSongs = useMemo(() => {
     const q = searchText.trim().toLowerCase();
     if (!q) return songs;
@@ -78,7 +75,7 @@ export default function LibraryScreen() {
 
   const showAlphaBar = !searchActive && displayedSongs.length > 0;
 
-  // ── Section-first-index map ───────────────────────────────────────────────
+  // ── Section-first-index map ─────────────────────────────────────────────
   const sectionMap = useMemo(() => {
     const map = new Map<string, number>();
     displayedSongs.forEach((song, idx) => {
@@ -89,10 +86,28 @@ export default function LibraryScreen() {
   }, [displayedSongs]);
 
   const availableLetters = useMemo(() => new Set(sectionMap.keys()), [sectionMap]);
-  const sectionMapRef = useRef(sectionMap);
-  sectionMapRef.current = sectionMap;
 
-  // ── Select mode ───────────────────────────────────────────────────────────
+  // ── Letter tap handler ──────────────────────────────────────────────────
+  const handleLetterPress = useCallback(
+    (letter: string) => {
+      Haptics.selectionAsync();
+
+      setActiveLetter(letter);
+      if (activeTimer.current) clearTimeout(activeTimer.current);
+      activeTimer.current = setTimeout(() => setActiveLetter(null), 900);
+
+      const target = sectionMap.get(letter);
+      if (target !== undefined) {
+        listRef.current?.scrollToIndex({ index: target, animated: true });
+      }
+    },
+    [sectionMap],
+  );
+
+  // cleanup timer on unmount
+  useEffect(() => () => { if (activeTimer.current) clearTimeout(activeTimer.current); }, []);
+
+  // ── Select mode ─────────────────────────────────────────────────────────
   const exitSelectMode = useCallback(() => {
     setSelectMode(false);
     setSelectedIds(new Set());
@@ -133,7 +148,7 @@ export default function LibraryScreen() {
     ]);
   }, [selectedIds, removeSongs, exitSelectMode]);
 
-  // ── Search ────────────────────────────────────────────────────────────────
+  // ── Search ──────────────────────────────────────────────────────────────
   const openSearch = useCallback(() => {
     setSearchActive(true);
     setTimeout(() => searchRef.current?.focus(), 80);
@@ -145,7 +160,7 @@ export default function LibraryScreen() {
     searchRef.current?.blur();
   }, []);
 
-  // ── Auto-scroll to current song on focus ──────────────────────────────────
+  // ── Auto-scroll to current song on focus ────────────────────────────────
   const scrollToCurrent = useCallback(() => {
     if (selectMode || searchActive) return;
     if (!listRef.current || !isListReady.current || !currentSong) return;
@@ -162,43 +177,7 @@ export default function LibraryScreen() {
     }, [scrollToCurrent]),
   );
 
-  // ── Alpha strip gesture ───────────────────────────────────────────────────
-  const handleStripTouch = useCallback((locationY: number) => {
-    if (stripHeightRef.current === 0) return;
-    const ratio = Math.max(0, Math.min(1, locationY / stripHeightRef.current));
-    const idx    = Math.min(Math.floor(ratio * LETTERS.length), LETTERS.length - 1);
-    const letter = LETTERS[idx];
-
-    if (letter !== lastHapticRef.current) {
-      lastHapticRef.current = letter;
-      if (sectionMapRef.current.has(letter)) Haptics.selectionAsync();
-    }
-
-    setActiveLetter(letter);
-    // bubble center = touch position relative to the strip's top
-    setBubbleY(Math.max(0, locationY - BUBBLE_SZ / 2));
-
-    const target = sectionMapRef.current.get(letter);
-    if (target !== undefined) {
-      listRef.current?.scrollToIndex({ index: target, animated: false });
-    }
-  }, []);
-
-  const handleStripTouchRef = useRef(handleStripTouch);
-  handleStripTouchRef.current = handleStripTouch;
-
-  const stripPanResponder = useRef(
-    PanResponder.create({
-      onStartShouldSetPanResponder: () => true,
-      onMoveShouldSetPanResponder:  () => true,
-      onPanResponderGrant:   (e) => handleStripTouchRef.current(e.nativeEvent.locationY),
-      onPanResponderMove:    (e) => handleStripTouchRef.current(e.nativeEvent.locationY),
-      onPanResponderRelease:    () => { setActiveLetter(null); lastHapticRef.current = null; },
-      onPanResponderTerminate:  () => { setActiveLetter(null); lastHapticRef.current = null; },
-    }),
-  ).current;
-
-  // ── Song row ──────────────────────────────────────────────────────────────
+  // ── Song row ────────────────────────────────────────────────────────────
   const renderItem = useCallback(
     ({ item }: { item: Song }) => {
       const isActive   = item.id === currentSong?.id;
@@ -247,21 +226,13 @@ export default function LibraryScreen() {
     [currentSong, selectedIds, selectMode, handlePress, handleLongPress, itemH, isCompact],
   );
 
-  const listBottomPad  = bottomInset + tabBarH + 16 + (selectMode ? 72 : 0);
-  const letterSz       = isCompact ? 10 : 11;
-
-  // The strip occupies: from just below the header, to the bottom safe area
-  const stripTop    = headerH;
-  const stripBottom = tabBarH + bottomInset;
+  const listBottomPad = bottomInset + tabBarH + 16 + (selectMode ? 72 : 0);
 
   return (
     <View style={[styles.container, { paddingTop: topInset }]}>
 
       {/* ── Header ── */}
-      <View
-        style={[styles.header, isCompact && styles.headerCompact]}
-        onLayout={(e) => setHeaderH(e.nativeEvent.layout.height)}
-      >
+      <View style={[styles.header, isCompact && styles.headerCompact]}>
         {selectMode ? (
           <>
             <Text style={styles.headerCount}>{selectedIds.size} selected</Text>
@@ -318,6 +289,53 @@ export default function LibraryScreen() {
         </View>
       )}
 
+      {/* ── Horizontal alphabet index bar ── */}
+      {showAlphaBar && (
+        <View style={styles.alphaBarShadowWrap}>
+          <ScrollView
+            ref={alphaListRef}
+            horizontal
+            showsHorizontalScrollIndicator={false}
+            keyboardShouldPersistTaps="handled"
+            style={styles.alphaBar}
+            contentContainerStyle={[
+              styles.alphaBarContent,
+              isCompact && styles.alphaBarContentCompact,
+            ]}
+          >
+            {LETTERS.map((letter) => {
+              const available = availableLetters.has(letter);
+              const isActive  = activeLetter === letter;
+
+              return (
+                <TouchableOpacity
+                  key={letter}
+                  onPress={available ? () => handleLetterPress(letter) : undefined}
+                  activeOpacity={0.55}
+                  style={[
+                    styles.alphaPill,
+                    { width: pillW, height: pillH },
+                    isActive && styles.alphaPillActive,
+                    !available && styles.alphaPillDisabled,
+                  ]}
+                >
+                  <Text
+                    style={[
+                      styles.alphaPillText,
+                      isCompact && styles.alphaPillTextCompact,
+                      isActive && styles.alphaPillTextActive,
+                      !available && styles.alphaPillTextDisabled,
+                    ]}
+                  >
+                    {letter}
+                  </Text>
+                </TouchableOpacity>
+              );
+            })}
+          </ScrollView>
+        </View>
+      )}
+
       {/* ── Song list ── */}
       {!isSetupDone || songs.length === 0 ? (
         <View style={styles.empty}>
@@ -339,10 +357,7 @@ export default function LibraryScreen() {
           data={displayedSongs}
           keyExtractor={(item) => item.id}
           renderItem={renderItem}
-          contentContainerStyle={{
-            paddingBottom: listBottomPad,
-            paddingRight: showAlphaBar ? STRIP_W + 6 : 0,
-          }}
+          contentContainerStyle={{ paddingBottom: listBottomPad }}
           showsVerticalScrollIndicator={false}
           getItemLayout={(_, index) => ({
             length: itemH,
@@ -363,70 +378,6 @@ export default function LibraryScreen() {
           }}
           keyboardShouldPersistTaps="handled"
         />
-      )}
-
-      {/* ── Alpha index strip ── */}
-      {showAlphaBar && (
-        <View
-          style={[
-            styles.alphaStrip,
-            {
-              top: stripTop,
-              bottom: stripBottom,
-              width: STRIP_W,
-            },
-          ]}
-          onLayout={(e) => { stripHeightRef.current = e.nativeEvent.layout.height; }}
-          {...stripPanResponder.panHandlers}
-        >
-          {LETTERS.map((letter) => {
-            const available = availableLetters.has(letter);
-            const isActive  = activeLetter === letter;
-            return (
-              <View key={letter} style={styles.alphaSlot}>
-                {isActive ? (
-                  // Active: small filled pill so the user can see which letter is selected
-                  <View style={styles.alphaPillActive}>
-                    <Text style={[styles.alphaLetterActive, { fontSize: letterSz + 1 }]}>
-                      {letter}
-                    </Text>
-                  </View>
-                ) : (
-                  <Text
-                    style={[
-                      styles.alphaLetter,
-                      { fontSize: letterSz },
-                      available
-                        ? styles.alphaAvailable
-                        : styles.alphaUnavailable,
-                    ]}
-                  >
-                    {letter}
-                  </Text>
-                )}
-              </View>
-            );
-          })}
-        </View>
-      )}
-
-      {/* ── Letter bubble (floats beside strip while dragging) ── */}
-      {activeLetter !== null && (
-        <View
-          style={[
-            styles.bubble,
-            {
-              top:   topInset + stripTop + bubbleY,
-              right: STRIP_W + 16,
-              width: BUBBLE_SZ,
-              height: BUBBLE_SZ,
-              borderRadius: BUBBLE_SZ / 2,
-            },
-          ]}
-          pointerEvents="none"
-        >
-          <Text style={styles.bubbleText}>{activeLetter}</Text>
-        </View>
       )}
 
       {/* ── Select mode action bar ── */}
@@ -453,7 +404,6 @@ export default function LibraryScreen() {
         </View>
       )}
 
-      {/* ── Queue panel ── */}
       <QueuePanel visible={showQueue} onClose={() => setShowQueue(false)} />
     </View>
   );
@@ -462,7 +412,7 @@ export default function LibraryScreen() {
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: Colors.dark.background },
 
-  // ── Header ──────────────────────────────────────────────────────────────
+  // ── Header ────────────────────────────────────────────────────────────
   header: {
     flexDirection: "row",
     alignItems: "center",
@@ -479,11 +429,7 @@ const styles = StyleSheet.create({
     letterSpacing: 0.5,
     textTransform: "uppercase",
   },
-  headerActions: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 8,
-  },
+  headerActions: { flexDirection: "row", alignItems: "center", gap: 8 },
   headerBtn: { padding: 6 },
   cancelText: {
     color: Colors.dark.textSecondary,
@@ -499,7 +445,7 @@ const styles = StyleSheet.create({
     justifyContent: "center",
   },
 
-  // ── Search bar ──────────────────────────────────────────────────────────
+  // ── Search bar ────────────────────────────────────────────────────────
   searchRow: {
     flexDirection: "row",
     alignItems: "center",
@@ -523,7 +469,67 @@ const styles = StyleSheet.create({
   },
   searchInputCompact: { fontSize: 13 },
 
-  // ── Song rows ───────────────────────────────────────────────────────────
+  // ── Alphabet bar ──────────────────────────────────────────────────────
+  //   Shadow wrapper provides the drop-shadow between the bar and the list.
+  alphaBarShadowWrap: {
+    backgroundColor: Colors.dark.background,
+    // Android shadow via elevation
+    elevation: 5,
+    // iOS shadow
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 3 },
+    shadowOpacity: 0.4,
+    shadowRadius: 5,
+    zIndex: 10,
+  },
+  alphaBar: {
+    backgroundColor: Colors.dark.backgroundSecondary,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: Colors.dark.border,
+  },
+  alphaBarContent: {
+    flexDirection: "row",
+    alignItems: "center",
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    gap: 4,
+  },
+  alphaBarContentCompact: { paddingVertical: 4 },
+
+  alphaPill: {
+    borderRadius: 8,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "transparent",
+  },
+  alphaPillActive: {
+    backgroundColor: Colors.dark.accent,
+    // Glow around active pill
+    shadowColor: Colors.dark.accent,
+    shadowOffset: { width: 0, height: 0 },
+    shadowOpacity: 0.6,
+    shadowRadius: 6,
+    elevation: 4,
+  },
+  alphaPillDisabled: {
+    opacity: 0.25,
+  },
+  alphaPillText: {
+    color: "rgba(255,255,255,0.75)",
+    fontSize: 13,
+    fontFamily: "Inter_600SemiBold",
+    lineHeight: 16,
+  },
+  alphaPillTextCompact: { fontSize: 12 },
+  alphaPillTextActive: {
+    color: "#fff",
+    fontFamily: "Inter_700Bold",
+  },
+  alphaPillTextDisabled: {
+    color: "rgba(255,255,255,0.3)",
+  },
+
+  // ── Song rows ─────────────────────────────────────────────────────────
   row: {
     flexDirection: "row",
     alignItems: "center",
@@ -572,7 +578,7 @@ const styles = StyleSheet.create({
     backgroundColor: Colors.dark.accent,
   },
 
-  // ── Empty states ────────────────────────────────────────────────────────
+  // ── Empty states ──────────────────────────────────────────────────────
   empty: {
     flex: 1,
     alignItems: "center",
@@ -602,7 +608,7 @@ const styles = StyleSheet.create({
     textAlign: "center",
   },
 
-  // ── Select mode action bar ──────────────────────────────────────────────
+  // ── Select mode action bar ────────────────────────────────────────────
   actionBar: {
     position: "absolute",
     left: 0,
@@ -624,64 +630,5 @@ const styles = StyleSheet.create({
     color: "#fff",
     fontSize: 15,
     fontFamily: "Inter_600SemiBold",
-  },
-
-  // ── Alpha index strip ───────────────────────────────────────────────────
-  alphaStrip: {
-    position: "absolute",
-    right: 0,
-    alignItems: "center",
-    justifyContent: "space-between",
-    paddingVertical: 4,
-    zIndex: 10,
-  },
-  alphaSlot: {
-    flex: 1,
-    width: STRIP_W,
-    alignItems: "center",
-    justifyContent: "center",
-    minHeight: 10,
-  },
-  alphaLetter: {
-    fontFamily: "Inter_600SemiBold",
-    lineHeight: 13,
-    textAlign: "center",
-  },
-  alphaAvailable:   { color: "rgba(255,255,255,0.6)" },
-  alphaUnavailable: { color: "rgba(255,255,255,0.15)" },
-
-  // Active state: pill with accent background
-  alphaPillActive: {
-    width: 22,
-    height: 22,
-    borderRadius: 11,
-    backgroundColor: Colors.dark.accent,
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  alphaLetterActive: {
-    color: "#fff",
-    fontFamily: "Inter_700Bold",
-    lineHeight: 14,
-    textAlign: "center",
-  },
-
-  // ── Letter bubble ───────────────────────────────────────────────────────
-  bubble: {
-    position: "absolute",
-    backgroundColor: Colors.dark.accent,
-    alignItems: "center",
-    justifyContent: "center",
-    zIndex: 20,
-    elevation: 10,
-    shadowColor: Colors.dark.accent,
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.4,
-    shadowRadius: 8,
-  },
-  bubbleText: {
-    color: "#fff",
-    fontSize: 22,
-    fontFamily: "Inter_700Bold",
   },
 });
