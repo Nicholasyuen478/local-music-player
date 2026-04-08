@@ -43,7 +43,6 @@ export default function PlayerScreen() {
   const {
     currentSong,
     currentArtworkUri,
-    queue,
     songs,
     shuffleEnabled,
     status,
@@ -60,49 +59,24 @@ export default function PlayerScreen() {
     seekTo,
   } = useMusicContext();
 
-  // ── Animated values ───────────────────────────────────────────────────
   const slideX = useRef(new Animated.Value(0)).current;
   const slideOpacity = useRef(new Animated.Value(1)).current;
-
-  // ── Stable refs for PanResponder callbacks ────────────────────────────
   const playNextRef = useRef(playNext);
   const playPrevRef = useRef(playPrev);
-  // Keep refs in sync every render (no useEffect needed for ref mutation)
   playNextRef.current = playNext;
   playPrevRef.current = playPrev;
 
-  // ── Helpers ───────────────────────────────────────────────────────────
-  function animateSongChange(
-    direction: "left" | "right",
-    onComplete: () => void,
-  ) {
+  function animateSongChange(direction: "left" | "right", onComplete: () => void) {
     Animated.parallel([
-      Animated.timing(slideX, {
-        toValue: direction === "left" ? -width : width,
-        duration: 200,
-        useNativeDriver: true,
-      }),
-      Animated.timing(slideOpacity, {
-        toValue: 0,
-        duration: 160,
-        useNativeDriver: true,
-      }),
+      Animated.timing(slideX, { toValue: direction === "left" ? -width : width, duration: 200, useNativeDriver: true }),
+      Animated.timing(slideOpacity, { toValue: 0, duration: 160, useNativeDriver: true }),
     ]).start(() => {
       onComplete();
       slideX.setValue(direction === "left" ? width : -width);
       slideOpacity.setValue(0);
       Animated.parallel([
-        Animated.spring(slideX, {
-          toValue: 0,
-          speed: 22,
-          bounciness: 3,
-          useNativeDriver: true,
-        }),
-        Animated.timing(slideOpacity, {
-          toValue: 1,
-          duration: 160,
-          useNativeDriver: true,
-        }),
+        Animated.spring(slideX, { toValue: 0, speed: 22, bounciness: 3, useNativeDriver: true }),
+        Animated.timing(slideOpacity, { toValue: 1, duration: 160, useNativeDriver: true }),
       ]).start();
     });
   }
@@ -111,9 +85,7 @@ export default function PlayerScreen() {
     PanResponder.create({
       onMoveShouldSetPanResponder: (_, { dx, dy }) =>
         Math.abs(dx) > 12 && Math.abs(dx) > Math.abs(dy),
-      onPanResponderMove: (_, { dx }) => {
-        slideX.setValue(dx * 0.35);
-      },
+      onPanResponderMove: (_, { dx }) => { slideX.setValue(dx * 0.35); },
       onPanResponderRelease: (_, { dx }) => {
         if (dx > SWIPE_THRESHOLD) {
           Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
@@ -122,10 +94,7 @@ export default function PlayerScreen() {
           Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
           animateSongChange("left", () => playNextRef.current());
         } else {
-          Animated.spring(slideX, {
-            toValue: 0,
-            useNativeDriver: true,
-          }).start();
+          Animated.spring(slideX, { toValue: 0, useNativeDriver: true }).start();
         }
       },
       onPanResponderTerminate: () => {
@@ -134,14 +103,10 @@ export default function PlayerScreen() {
     }),
   ).current;
 
-  // ── Callbacks ─────────────────────────────────────────────────────────
   const handleClearAll = useCallback(() => {
     Alert.alert("Clear library", "Remove all songs and return to setup?", [
       { text: "Cancel", style: "cancel" },
-      {
-        text: "Clear",
-        style: "destructive",
-        onPress: () => {
+      { text: "Clear", style: "destructive", onPress: () => {
           Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning);
           resetSetup();
         },
@@ -154,25 +119,13 @@ export default function PlayerScreen() {
     try {
       const success = await scanDeviceMusic();
       if (success && !hasCustomImages) {
-        Alert.alert(
-          "Add artwork",
-          "Pick images from your gallery to use as song artwork?",
-          [
-            { text: "Skip", style: "cancel" },
-            {
-              text: "Choose images",
-              onPress: async () => {
-                await pickImageFolder();
-              },
-            },
-          ],
-        );
+        Alert.alert("Add artwork", "Pick images from your gallery to use as song artwork?", [
+          { text: "Skip", style: "cancel" },
+          { text: "Choose images", onPress: async () => { await pickImageFolder(); } },
+        ]);
       }
-    } catch (e) {
-      console.error("scan error", e);
-    } finally {
-      setIsScanning(false);
-    }
+    } catch (e) { console.error("scan error", e); }
+    finally { setIsScanning(false); }
     return true;
   }, [scanDeviceMusic, pickImageFolder, hasCustomImages]);
 
@@ -196,45 +149,44 @@ export default function PlayerScreen() {
     toggleShuffle();
   }, [toggleShuffle]);
 
-  // ── Early return AFTER all hooks ──────────────────────────────────────
   if (!isSetupDone) {
-    return (
-      <SetupScreen onScan={handleScan} isLoading={isScanning || isLoading} />
-    );
+    return <SetupScreen onScan={handleScan} isLoading={isScanning || isLoading} />;
   }
 
-  // ── Responsive sizes ──────────────────────────────────────────────────
-  const titleSize = Math.round(22 * fontScale);
+  const titleSize  = Math.round(22 * fontScale);
   const artistSize = Math.round(14 * fontScale);
-  const iconSize = isCompact ? 24 : 28;
-  const playBtnSize = isCompact ? 56 : 64;
-  const playIconSize = isCompact ? 28 : 32;
+  const iconSize   = isCompact ? 24 : 28;
+  const playBtnSz  = isCompact ? 60 : 70;
+  const playIconSz = isCompact ? 28 : 34;
 
   return (
     <View style={[styles.container, { paddingTop: topInset }]}>
-      {/* Top utility bar */}
-      <View style={styles.topBar}>
+
+      {/* ── Top utility bar ── */}
+      <View style={[styles.topBar, isCompact && styles.topBarCompact]}>
         <TouchableOpacity
           onPress={handleClearAll}
-          style={styles.iconBtn}
+          style={styles.utilBtn}
           activeOpacity={0.6}
+          hitSlop={8}
         >
-          <Trash2 size={18} color={Colors.dark.textTertiary} />
+          <Trash2 size={17} color={Colors.dark.textTertiary} />
         </TouchableOpacity>
         <TouchableOpacity
           onPress={handleScan}
-          style={styles.iconBtn}
+          style={styles.utilBtn}
           activeOpacity={0.6}
           disabled={isScanning}
+          hitSlop={8}
         >
           <ScanSearch
-            size={18}
+            size={17}
             color={isScanning ? Colors.dark.accent : Colors.dark.textTertiary}
           />
         </TouchableOpacity>
       </View>
 
-      {/* Artwork — fills remaining flex space, centered */}
+      {/* ── Artwork ── */}
       <View style={[styles.artWrapper, { paddingVertical: artPadV }]}>
         <Animated.View
           style={{
@@ -242,20 +194,26 @@ export default function PlayerScreen() {
             height: artSize,
             transform: [{ translateX: slideX }],
             opacity: slideOpacity,
-            borderRadius: 4,
+            borderRadius: 20,
             overflow: "hidden",
+            // Subtle shadow for depth
+            shadowColor: Colors.dark.accent,
+            shadowOffset: { width: 0, height: 8 },
+            shadowOpacity: 0.25,
+            shadowRadius: 20,
+            elevation: 12,
           }}
           {...panResponder.panHandlers}
         >
           <SongArtwork
             artworkUri={currentArtworkUri}
             size={artSize}
-            borderRadius={4}
+            borderRadius={20}
           />
         </Animated.View>
       </View>
 
-      {/* Song info */}
+      {/* ── Song info + shuffle ── */}
       <View style={[styles.infoRow, isCompact && styles.infoRowCompact]}>
         <View style={styles.infoText}>
           <Text
@@ -268,25 +226,31 @@ export default function PlayerScreen() {
             style={[styles.songArtist, { fontSize: artistSize }]}
             numberOfLines={1}
           >
-            {currentSong?.artist ??
-              (songs.length > 0 ? `${songs.length} songs` : "")}
+            {currentSong?.artist ?? (songs.length > 0 ? `${songs.length} songs` : "")}
           </Text>
         </View>
-        <TouchableOpacity
-          onPress={handleShuffle}
-          style={styles.shuffleBtn}
-          activeOpacity={0.7}
-        >
-          <Shuffle
-            size={isCompact ? 18 : 20}
-            color={
-              shuffleEnabled ? Colors.dark.accent : Colors.dark.textTertiary
-            }
-          />
-        </TouchableOpacity>
+
+        {/* Shuffle button — shows indicator dot when active */}
+        <View style={styles.shuffleWrap}>
+          <TouchableOpacity
+            onPress={handleShuffle}
+            style={[
+              styles.shuffleBtn,
+              shuffleEnabled && styles.shuffleBtnActive,
+            ]}
+            activeOpacity={0.7}
+            hitSlop={8}
+          >
+            <Shuffle
+              size={isCompact ? 17 : 19}
+              color={shuffleEnabled ? Colors.dark.accent : Colors.dark.textTertiary}
+            />
+          </TouchableOpacity>
+          {shuffleEnabled && <View style={styles.shuffleDot} />}
+        </View>
       </View>
 
-      {/* Seek bar */}
+      {/* ── Seek bar ── */}
       <View style={[styles.seekSection, isCompact && styles.seekSectionCompact]}>
         <SeekBar
           duration={status.duration ?? 0}
@@ -295,44 +259,37 @@ export default function PlayerScreen() {
         />
       </View>
 
-      {/* Playback controls */}
+      {/* ── Playback controls ── */}
       <View style={[styles.controls, { paddingBottom: controlsBottomPad }]}>
         <TouchableOpacity
           onPress={handlePrev}
-          style={styles.controlBtn}
-          activeOpacity={0.7}
+          style={styles.skipBtn}
+          activeOpacity={0.65}
+          hitSlop={8}
         >
           <SkipBack size={iconSize} color={Colors.dark.text} fill={Colors.dark.text} />
         </TouchableOpacity>
 
         <TouchableOpacity
           onPress={handlePlayPause}
-          activeOpacity={0.85}
+          activeOpacity={0.82}
           style={[
             styles.playBtn,
-            { width: playBtnSize, height: playBtnSize, borderRadius: playBtnSize / 2 },
+            { width: playBtnSz, height: playBtnSz, borderRadius: playBtnSz / 2 },
           ]}
         >
           {status.playing ? (
-            <Pause
-              size={playIconSize}
-              color={Colors.dark.background}
-              fill={Colors.dark.background}
-            />
+            <Pause size={playIconSz} color={Colors.dark.background} fill={Colors.dark.background} />
           ) : (
-            <Play
-              size={playIconSize}
-              color={Colors.dark.background}
-              fill={Colors.dark.background}
-              style={{ marginLeft: 3 }}
-            />
+            <Play size={playIconSz} color={Colors.dark.background} fill={Colors.dark.background} style={{ marginLeft: 3 }} />
           )}
         </TouchableOpacity>
 
         <TouchableOpacity
           onPress={handleNext}
-          style={styles.controlBtn}
-          activeOpacity={0.7}
+          style={styles.skipBtn}
+          activeOpacity={0.65}
+          hitSlop={8}
         >
           <SkipForward size={iconSize} color={Colors.dark.text} fill={Colors.dark.text} />
         </TouchableOpacity>
@@ -342,76 +299,111 @@ export default function PlayerScreen() {
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: Colors.dark.background },
+  container: {
+    flex: 1,
+    backgroundColor: Colors.dark.background,
+  },
+
   topBar: {
     flexDirection: "row",
     justifyContent: "space-between",
-    paddingHorizontal: 20,
-    paddingTop: 4,
-    paddingBottom: 8,
+    paddingHorizontal: 24,
+    paddingTop: 6,
+    paddingBottom: 4,
   },
-  iconBtn: {
-    width: 36,
-    height: 36,
+  topBarCompact: { paddingTop: 2, paddingBottom: 2 },
+
+  utilBtn: {
+    width: 38,
+    height: 38,
+    borderRadius: 19,
+    backgroundColor: Colors.dark.surfaceSecondary,
     alignItems: "center",
     justifyContent: "center",
   },
+
   artWrapper: {
     alignItems: "center",
-    paddingHorizontal: 24,
+    paddingHorizontal: 20,
     flex: 1,
     justifyContent: "center",
   },
+
   infoRow: {
     flexDirection: "row",
     alignItems: "center",
-    paddingHorizontal: 24,
-    marginBottom: 4,
+    paddingHorizontal: 28,
+    marginBottom: 6,
     gap: 12,
   },
-  infoRowCompact: {
-    marginBottom: 2,
-  },
+  infoRowCompact: { marginBottom: 2 },
+
   infoText: { flex: 1 },
+
   songTitle: {
     color: Colors.dark.text,
     fontFamily: "Inter_700Bold",
-    letterSpacing: -0.3,
+    letterSpacing: -0.4,
   },
   songArtist: {
     color: Colors.dark.textSecondary,
     fontFamily: "Inter_400Regular",
-    marginTop: 3,
+    marginTop: 4,
+  },
+
+  shuffleWrap: {
+    alignItems: "center",
   },
   shuffleBtn: {
-    width: 40,
-    height: 40,
+    width: 42,
+    height: 42,
+    borderRadius: 21,
     alignItems: "center",
     justifyContent: "center",
   },
+  shuffleBtnActive: {
+    backgroundColor: Colors.dark.accentDim,
+  },
+  shuffleDot: {
+    width: 4,
+    height: 4,
+    borderRadius: 2,
+    backgroundColor: Colors.dark.accent,
+    marginTop: 2,
+  },
+
   seekSection: {
-    paddingHorizontal: 16,
-    marginBottom: 8,
+    paddingHorizontal: 20,
+    marginBottom: 6,
   },
-  seekSectionCompact: {
-    marginBottom: 4,
-  },
+  seekSectionCompact: { marginBottom: 2 },
+
   controls: {
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "center",
     paddingHorizontal: 24,
-    gap: 40,
+    gap: 36,
   },
-  controlBtn: {
-    width: 52,
-    height: 52,
+
+  skipBtn: {
+    width: 56,
+    height: 56,
+    borderRadius: 28,
     alignItems: "center",
     justifyContent: "center",
+    backgroundColor: Colors.dark.surfaceSecondary,
   },
+
   playBtn: {
     backgroundColor: Colors.dark.text,
     alignItems: "center",
     justifyContent: "center",
+    // Shadow on play button
+    shadowColor: "#FFFFFF",
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.15,
+    shadowRadius: 8,
+    elevation: 6,
   },
 });

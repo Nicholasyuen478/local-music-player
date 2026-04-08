@@ -22,9 +22,8 @@ export default function QueuePanel({ visible, onClose }: Props) {
   const { queue, currentIndex, playSong } = useMusicContext();
   const { topInset, bottomInset, tabBarH, isCompact } = useLayout();
   const listRef = useRef<FlatList>(null);
-  const itemHeight = isCompact ? 52 : 56;
+  const itemH = isCompact ? 56 : 62;
 
-  // Auto-scroll to current song when panel opens
   useEffect(() => {
     if (!visible || currentIndex <= 0) return;
     const timer = setTimeout(() => {
@@ -32,7 +31,7 @@ export default function QueuePanel({ visible, onClose }: Props) {
         index: Math.max(0, currentIndex - 2),
         animated: false,
       });
-    }, 350); // wait for modal slide-up
+    }, 360);
     return () => clearTimeout(timer);
   }, [visible, currentIndex]);
 
@@ -53,20 +52,19 @@ export default function QueuePanel({ visible, onClose }: Props) {
         <TouchableOpacity
           style={[
             styles.row,
-            { height: itemHeight },
+            { height: itemH },
             isCurrent && styles.rowCurrent,
-            isPast && styles.rowPast,
           ]}
           onPress={() => handleSongPress(item, index)}
-          activeOpacity={0.6}
+          activeOpacity={0.65}
         >
           <View style={styles.indexCol}>
             {isCurrent ? (
-              <View style={styles.playingDot} />
+              <View style={styles.playingPill}>
+                <View style={styles.playingDot} />
+              </View>
             ) : (
-              <Text
-                style={[styles.indexNum, isPast && styles.indexNumPast]}
-              >
+              <Text style={[styles.indexNum, isPast && styles.indexNumPast]}>
                 {index + 1}
               </Text>
             )}
@@ -98,7 +96,7 @@ export default function QueuePanel({ visible, onClose }: Props) {
         </TouchableOpacity>
       );
     },
-    [currentIndex, handleSongPress, itemHeight, isCompact],
+    [currentIndex, handleSongPress, itemH, isCompact],
   );
 
   return (
@@ -110,36 +108,35 @@ export default function QueuePanel({ visible, onClose }: Props) {
     >
       <View style={[styles.container, { paddingTop: topInset }]}>
 
-        {/* Handle bar */}
         <View style={styles.handle} />
 
-        {/* Header */}
         <View style={styles.header}>
           <View>
             <Text style={styles.headerTitle}>Playback Queue</Text>
             <Text style={styles.headerSub}>
-              {queue.length} songs · #{currentIndex + 1} playing
+              {queue.length} songs · playing #{currentIndex + 1}
             </Text>
           </View>
           <TouchableOpacity
             onPress={onClose}
             style={styles.closeBtn}
-            hitSlop={10}
+            hitSlop={12}
           >
             <X size={20} color={Colors.dark.textSecondary} />
           </TouchableOpacity>
         </View>
 
-        {/* Section labels */}
         {currentIndex > 0 && (
           <Text style={styles.sectionLabel}>
-            {currentIndex} song{currentIndex > 1 ? "s" : ""} before
+            {currentIndex} song{currentIndex > 1 ? "s" : ""} played
           </Text>
         )}
 
         {queue.length === 0 ? (
           <View style={styles.empty}>
-            <Music2 size={36} color={Colors.dark.textTertiary} />
+            <View style={styles.emptyIcon}>
+              <Music2 size={30} color={Colors.dark.accent} />
+            </View>
             <Text style={styles.emptyText}>Queue is empty</Text>
           </View>
         ) : (
@@ -153,8 +150,8 @@ export default function QueuePanel({ visible, onClose }: Props) {
               paddingBottom: bottomInset + tabBarH + 16,
             }}
             getItemLayout={(_, index) => ({
-              length: itemHeight,
-              offset: itemHeight * index,
+              length: itemH,
+              offset: itemH * index,
               index,
             })}
             onScrollToIndexFailed={({ index }) => {
@@ -175,15 +172,15 @@ export default function QueuePanel({ visible, onClose }: Props) {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: Colors.dark.background,
+    backgroundColor: Colors.dark.backgroundSecondary,
   },
   handle: {
-    width: 36,
+    width: 40,
     height: 4,
     borderRadius: 2,
-    backgroundColor: "rgba(255,255,255,0.2)",
+    backgroundColor: Colors.dark.border,
     alignSelf: "center",
-    marginTop: 8,
+    marginTop: 10,
     marginBottom: 4,
   },
   header: {
@@ -191,35 +188,41 @@ const styles = StyleSheet.create({
     alignItems: "flex-start",
     justifyContent: "space-between",
     paddingHorizontal: 24,
-    paddingTop: 12,
+    paddingTop: 14,
     paddingBottom: 8,
   },
   headerTitle: {
     color: Colors.dark.text,
     fontSize: 18,
-    fontFamily: "Inter_600SemiBold",
+    fontFamily: "Inter_700Bold",
+    letterSpacing: -0.2,
   },
   headerSub: {
     color: Colors.dark.textTertiary,
     fontSize: 12,
     fontFamily: "Inter_400Regular",
-    marginTop: 2,
+    marginTop: 3,
   },
   closeBtn: {
-    padding: 4,
+    width: 34,
+    height: 34,
+    borderRadius: 17,
+    backgroundColor: Colors.dark.surface,
+    alignItems: "center",
+    justifyContent: "center",
     marginTop: 2,
   },
   sectionLabel: {
     color: Colors.dark.textTertiary,
     fontSize: 11,
     fontFamily: "Inter_500Medium",
-    letterSpacing: 0.6,
+    letterSpacing: 0.7,
     textTransform: "uppercase",
     paddingHorizontal: 24,
-    paddingBottom: 4,
+    paddingBottom: 6,
+    paddingTop: 2,
   },
 
-  // ── Song rows ───────────────────────────────────────────────────────────
   row: {
     flexDirection: "row",
     alignItems: "center",
@@ -227,13 +230,11 @@ const styles = StyleSheet.create({
     gap: 10,
   },
   rowCurrent: {
-    backgroundColor: "rgba(108,99,255,0.1)",
+    backgroundColor: Colors.dark.accentDim,
   },
-  rowPast: {
-    opacity: 0.45,
-  },
+
   indexCol: {
-    width: 28,
+    width: 32,
     alignItems: "center",
     justifyContent: "center",
   },
@@ -242,15 +243,22 @@ const styles = StyleSheet.create({
     fontSize: 12,
     fontFamily: "Inter_400Regular",
   },
-  indexNumPast: {
-    color: "rgba(255,255,255,0.3)",
+  indexNumPast: { opacity: 0.4 },
+  playingPill: {
+    width: 24,
+    height: 24,
+    borderRadius: 12,
+    backgroundColor: "rgba(108,99,255,0.25)",
+    alignItems: "center",
+    justifyContent: "center",
   },
   playingDot: {
-    width: 7,
-    height: 7,
-    borderRadius: 3.5,
+    width: 8,
+    height: 8,
+    borderRadius: 4,
     backgroundColor: Colors.dark.accent,
   },
+
   rowText: { flex: 1 },
   title: {
     color: Colors.dark.textSecondary,
@@ -258,8 +266,8 @@ const styles = StyleSheet.create({
     fontFamily: "Inter_500Medium",
   },
   titleCompact: { fontSize: 13 },
-  titleCurrent: { color: Colors.dark.text },
-  titlePast: { color: Colors.dark.textTertiary },
+  titleCurrent: { color: Colors.dark.text, fontFamily: "Inter_600SemiBold" },
+  titlePast: { color: Colors.dark.textTertiary, opacity: 0.6 },
   artist: {
     color: Colors.dark.textTertiary,
     fontSize: 12,
@@ -267,25 +275,32 @@ const styles = StyleSheet.create({
     marginTop: 1,
   },
   artistCompact: { fontSize: 11 },
-  artistPast: { color: "rgba(255,255,255,0.25)" },
+  artistPast: { opacity: 0.4 },
   activeBar: {
     width: 3,
-    height: 18,
+    height: 20,
     borderRadius: 2,
     backgroundColor: Colors.dark.accent,
   },
 
-  // ── Empty state ─────────────────────────────────────────────────────────
   empty: {
     flex: 1,
     alignItems: "center",
     justifyContent: "center",
-    gap: 12,
+    gap: 14,
     paddingBottom: 80,
   },
+  emptyIcon: {
+    width: 68,
+    height: 68,
+    borderRadius: 34,
+    backgroundColor: Colors.dark.accentDim,
+    alignItems: "center",
+    justifyContent: "center",
+  },
   emptyText: {
-    color: Colors.dark.textTertiary,
+    color: Colors.dark.textSecondary,
     fontSize: 15,
-    fontFamily: "Inter_400Regular",
+    fontFamily: "Inter_500Medium",
   },
 });

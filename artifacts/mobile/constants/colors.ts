@@ -2,24 +2,25 @@ const accent = "#6C63FF";
 
 export default {
   dark: {
-    background: "#000000",
-    backgroundSecondary: "#111111",
-    backgroundTertiary: "#1a1a1a",
-    surface: "#1a1a1a",
-    surfaceSecondary: "#222222",
-    border: "#282828",
-    borderLight: "#333333",
+    background: "#0A0A12",          // deep indigo-black
+    backgroundSecondary: "#101018",
+    backgroundTertiary: "#17172A",
+    surface: "#14141E",             // card surfaces
+    surfaceSecondary: "#1C1C2E",    // elevated cards
+    border: "#25253A",
+    borderLight: "#32324A",
     text: "#FFFFFF",
-    textSecondary: "#B3B3B3",
-    textTertiary: "#535353",
+    textSecondary: "#B0B0C8",
+    textTertiary: "#60607A",
     accent,
     accentLight: "#8B84FF",
     accentDark: "#4A42CC",
+    accentDim: "rgba(108,99,255,0.15)",
     tint: accent,
-    tabIconDefault: "#535353",
+    tabIconDefault: "#60607A",
     tabIconSelected: "#FFFFFF",
     danger: "#FF5C5C",
     success: "#1DB954",
-    overlay: "rgba(0,0,0,0.75)",
+    overlay: "rgba(0,0,0,0.8)",
   },
 };

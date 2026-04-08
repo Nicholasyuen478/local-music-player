@@ -1,8 +1,8 @@
 import { Tabs } from "expo-router";
+import { BlurView } from "expo-blur";
 import { ImageIcon, Library, Music2 } from "lucide-react-native";
 import React from "react";
 import { Platform, StyleSheet, useWindowDimensions, View } from "react-native";
-import { BlurView } from "expo-blur";
 import Colors from "@/constants/colors";
 import { TAB_BAR_H_COMPACT, TAB_BAR_H_NORMAL } from "@/hooks/useLayout";
 
@@ -11,17 +11,24 @@ export default function TabLayout() {
   const isCompact = height < 700;
   const tabBarHeight = isCompact ? TAB_BAR_H_COMPACT : TAB_BAR_H_NORMAL;
   const isIOS = Platform.OS === "ios";
+  const iconSize = isCompact ? 21 : 23;
 
   return (
     <Tabs
       screenOptions={{
         headerShown: false,
-        tabBarShowLabel: false,
+        tabBarShowLabel: !isCompact,
+        tabBarLabelStyle: {
+          fontSize: 10,
+          fontFamily: "Inter_500Medium",
+          marginBottom: 4,
+          letterSpacing: 0.2,
+        },
         tabBarActiveTintColor: Colors.dark.text,
         tabBarInactiveTintColor: Colors.dark.textTertiary,
         tabBarStyle: {
           position: "absolute",
-          backgroundColor: isIOS ? "transparent" : Colors.dark.background,
+          backgroundColor: isIOS ? "transparent" : "rgba(10,10,18,0.96)",
           borderTopWidth: StyleSheet.hairlineWidth,
           borderTopColor: Colors.dark.border,
           elevation: 0,
@@ -29,33 +36,43 @@ export default function TabLayout() {
         },
         tabBarBackground: () =>
           isIOS ? (
-            <BlurView intensity={90} tint="dark" style={StyleSheet.absoluteFill} />
+            <BlurView
+              intensity={85}
+              tint="dark"
+              style={StyleSheet.absoluteFill}
+            />
           ) : (
             <View
-              style={[StyleSheet.absoluteFill, { backgroundColor: Colors.dark.background }]}
+              style={[
+                StyleSheet.absoluteFill,
+                { backgroundColor: "rgba(10,10,18,0.96)" },
+              ]}
             />
           ),
         tabBarIconStyle: {
-          marginTop: isCompact ? 0 : 2,
+          marginTop: isCompact ? 2 : 6,
         },
       }}
     >
       <Tabs.Screen
         name="index"
         options={{
-          tabBarIcon: ({ color }) => <Music2 size={isCompact ? 20 : 22} color={color} />,
+          tabBarLabel: "Player",
+          tabBarIcon: ({ color }) => <Music2 size={iconSize} color={color} />,
         }}
       />
       <Tabs.Screen
         name="library"
         options={{
-          tabBarIcon: ({ color }) => <Library size={isCompact ? 20 : 22} color={color} />,
+          tabBarLabel: "Library",
+          tabBarIcon: ({ color }) => <Library size={iconSize} color={color} />,
         }}
       />
       <Tabs.Screen
         name="images"
         options={{
-          tabBarIcon: ({ color }) => <ImageIcon size={isCompact ? 20 : 22} color={color} />,
+          tabBarLabel: "Artwork",
+          tabBarIcon: ({ color }) => <ImageIcon size={iconSize} color={color} />,
         }}
       />
     </Tabs>

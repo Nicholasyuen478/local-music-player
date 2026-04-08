@@ -6,9 +6,10 @@ import {
 } from "@expo-google-fonts/inter";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { useFonts } from "expo-font";
-import { Stack } from "expo-router";
+import { router, Stack } from "expo-router";
 import * as SplashScreen from "expo-splash-screen";
 import React, { useEffect } from "react";
+import { Linking } from "react-native";
 import { GestureHandlerRootView } from "react-native-gesture-handler";
 import { SafeAreaProvider } from "react-native-safe-area-context";
 
@@ -20,6 +21,27 @@ SplashScreen.preventAutoHideAsync();
 const queryClient = new QueryClient();
 
 function RootLayoutNav() {
+  useEffect(() => {
+    // RNTP fires trackplayer://notification.click when the media
+    // notification is tapped. Route that straight to the player tab.
+    const handleUrl = ({ url }: { url: string }) => {
+      if (url.includes("notification.click")) {
+        router.replace("/(tabs)/");
+      }
+    };
+
+    const sub = Linking.addEventListener("url", handleUrl);
+
+    // Cold-start: app was launched by tapping the notification
+    Linking.getInitialURL().then((url) => {
+      if (url?.includes("notification.click")) {
+        router.replace("/(tabs)/");
+      }
+    });
+
+    return () => sub.remove();
+  }, []);
+
   return (
     <Stack screenOptions={{ headerShown: false }}>
       <Stack.Screen name="(tabs)" options={{ headerShown: false }} />

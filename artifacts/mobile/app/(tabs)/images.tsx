@@ -10,6 +10,7 @@ import {
   StyleSheet,
   Text,
   TouchableOpacity,
+  useWindowDimensions,
   View,
 } from "react-native";
 import ImageCropPicker from "react-native-image-crop-picker";
@@ -17,10 +18,9 @@ import Colors from "@/constants/colors";
 import { useMusicContext } from "@/context/MusicContext";
 import { useLayout } from "@/hooks/useLayout";
 
-const THUMB_SIZE = 110;
 const COLUMNS = 3;
+const GAP = 6;
 
-/** Only user-picked images (not bundled assets) can be cropped */
 function isUserPickedUri(uri: string): boolean {
   return (
     uri.startsWith("file://") ||
@@ -31,19 +31,20 @@ function isUserPickedUri(uri: string): boolean {
 }
 
 export default function ImagesScreen() {
-  const { topInset, bottomInset, tabBarH } = useLayout();
+  const { topInset, bottomInset, tabBarH, isCompact } = useLayout();
+  const { width } = useWindowDimensions();
   const { imagePool, addImagesToPool, removeImageFromPool, cropImageInPool } =
     useMusicContext();
+
+  const thumbSize = Math.floor((width - GAP * (COLUMNS + 1)) / COLUMNS);
 
   const [isAdding, setIsAdding] = useState(false);
   const [croppingUri, setCroppingUri] = useState<string | null>(null);
 
-  // ── Add images ──────────────────────────────────────────────────────────
   const handlePickFiles = async () => {
     setIsAdding(true);
     try {
-      const { status } =
-        await ImagePicker.requestMediaLibraryPermissionsAsync();
+      const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
       if (status !== "granted") return;
       const result = await ImagePicker.launchImageLibraryAsync({
         mediaTypes: ["images"],
@@ -56,85 +57,75 @@ export default function ImagesScreen() {
         await addImagesToPool(uris);
         Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
       }
-    } catch (e) {
-      console.error("pick error", e);
-    } finally {
-      setIsAdding(false);
-    }
+    } catch (e) { console.error("pick error", e); }
+    finally { setIsAdding(false); }
   };
 
-  // ── Remove image ─────────────────────────────────────────────────────────
   const handleRemove = (uri: string) => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
     Alert.alert("Remove image?", undefined, [
       { text: "Cancel", style: "cancel" },
-      {
-        text: "Remove",
-        style: "destructive",
-        onPress: () => removeImageFromPool(uri),
-      },
+      { text: "Remove", style: "destructive", onPress: () => removeImageFromPool(uri) },
     ]);
   };
 
-  // ── Crop image via react-native-image-crop-picker ───────────────────────
-  // Uses the library's native crop UI — no custom canvas math needed.
-  const handleCrop = useCallback(
-    async (uri: string) => {
-      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-      setCroppingUri(uri);
-      try {
-        const result = await ImageCropPicker.openCropper({
-          path: uri,
-          width: 1000,
-          height: 1000,
-          cropping: true,
-          mediaType: "photo",
-          compressImageQuality: 0.92,
-          // Keep the crop square (1:1 aspect ratio)
-          freeStyleCropEnabled: false,
-          // Android toolbar theming
-          cropperToolbarTitle: "Crop image",
-          cropperActiveWidgetColor: Colors.dark.accent,
-          cropperStatusBarColor: "#000000",
-          cropperToolbarColor: "#111111",
-          cropperToolbarWidgetColor: "#FFFFFF",
-        });
-        const croppedUri = result.path;
-        await cropImageInPool(uri, croppedUri);
-        Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-      } catch (e: any) {
-        // E_PICKER_CANCELLED = user dismissed — not an error
-        if (e?.code !== "E_PICKER_CANCELLED") {
-          console.error("crop error", e);
-        }
-      } finally {
-        setCroppingUri(null);
-      }
-    },
-    [cropImageInPool],
-  );
+  const handleCrop = useCallback(async (uri: string) => {
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    setCroppingUri(uri);
+    try {
+      const result = await ImageCropPicker.openCropper({
+        path: uri,
+        width: 1000,
+        height: 1000,
+        cropping: true,
+        mediaType: "photo",
+        compressImageQuality: 0.92,
+        freeStyleCropEnabled: false,
+        cropperToolbarTitle: "Crop image",
+        cropperActiveWidgetColor: Colors.dark.accent,
+        cropperStatusBarColor: "#000000",
+        cropperToolbarColor: "#111111",
+        cropperToolbarWidgetColor: "#FFFFFF",
+      });
+      await cropImageInPool(uri, result.path);
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+    } catch (e: any) {
+      if (e?.code !== "E_PICKER_CANCELLED") console.error("crop error", e);
+    } finally { setCroppingUri(null); }
+  }, [cropImageInPool]);
 
   return (
     <View style={[styles.container, { paddingTop: topInset }]}>
-      <View style={styles.header}>
+
+      {/* Header */}
+      <View style={[styles.header, isCompact && styles.headerCompact]}>
         <Text style={styles.headerCount}>
-          {imagePool.length > 0 ? `${imagePool.length} images` : ""}
+          {imagePool.length > 0 ? `${imagePool.length} images` : "Artwork pool"}
         </Text>
         <TouchableOpacity
-          style={[styles.addBtn, isAdding && { opacity: 0.4 }]}
+          style={[styles.addBtn, isAdding && styles.addBtnLoading]}
           onPress={handlePickFiles}
-          activeOpacity={0.6}
+          activeOpacity={0.7}
           disabled={isAdding}
+          hitSlop={8}
         >
-          <Plus size={20} color={Colors.dark.textTertiary} />
+          {isAdding ? (
+            <ActivityIndicator size="small" color={Colors.dark.accent} />
+          ) : (
+            <Plus size={20} color="#fff" />
+          )}
         </TouchableOpacity>
       </View>
 
       {imagePool.length === 0 ? (
         <View style={styles.emptyState}>
-          <ImageIcon size={36} color={Colors.dark.textTertiary} />
-          <Text style={styles.emptyText}>No images</Text>
-          <Text style={styles.emptyHint}>Tap + to add artwork images</Text>
+          <View style={styles.emptyIcon}>
+            <ImageIcon size={32} color={Colors.dark.accent} />
+          </View>
+          <Text style={styles.emptyText}>No artwork yet</Text>
+          <Text style={styles.emptyHint}>
+            Tap the + button to add images from your gallery
+          </Text>
         </View>
       ) : (
         <FlatList
@@ -143,17 +134,17 @@ export default function ImagesScreen() {
           numColumns={COLUMNS}
           showsVerticalScrollIndicator={false}
           contentContainerStyle={{
-            paddingHorizontal: 12,
+            paddingHorizontal: GAP,
             paddingBottom: bottomInset + tabBarH + 16,
-            gap: 4,
+            gap: GAP,
           }}
-          columnWrapperStyle={{ gap: 4 }}
+          columnWrapperStyle={{ gap: GAP }}
           renderItem={({ item }) => {
             const isCropping = croppingUri === item;
             const canCrop = isUserPickedUri(item);
 
             return (
-              <View style={styles.thumb}>
+              <View style={[styles.thumb, { width: thumbSize, height: thumbSize }]}>
                 <Image
                   source={{ uri: item }}
                   style={styles.thumbImg}
@@ -161,34 +152,31 @@ export default function ImagesScreen() {
                   transition={200}
                 />
 
-                {/* Crop spinner overlay while this specific image is being cropped */}
                 {isCropping && (
                   <View style={styles.spinnerOverlay}>
                     <ActivityIndicator size="small" color="#fff" />
                   </View>
                 )}
 
-                {/* Crop button — bottom-left, only for user-picked images */}
                 {canCrop && !isCropping && (
                   <TouchableOpacity
                     style={[styles.overlayBtn, styles.cropBtn]}
                     onPress={() => handleCrop(item)}
-                    hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                    hitSlop={10}
                   >
                     <View style={styles.overlayBtnInner}>
-                      <Scissors size={10} color="#fff" />
+                      <Scissors size={11} color="#fff" />
                     </View>
                   </TouchableOpacity>
                 )}
 
-                {/* Remove button — top-right */}
                 <TouchableOpacity
                   style={[styles.overlayBtn, styles.removeBtn]}
                   onPress={() => handleRemove(item)}
-                  hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                  hitSlop={10}
                 >
                   <View style={styles.overlayBtnInner}>
-                    <X size={10} color="#fff" />
+                    <X size={11} color="#fff" />
                   </View>
                 </TouchableOpacity>
               </View>
@@ -202,14 +190,16 @@ export default function ImagesScreen() {
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: Colors.dark.background },
+
   header: {
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
     paddingHorizontal: 24,
     paddingTop: 8,
-    paddingBottom: 16,
+    paddingBottom: 14,
   },
+  headerCompact: { paddingTop: 4, paddingBottom: 10 },
   headerCount: {
     color: Colors.dark.textTertiary,
     fontSize: 12,
@@ -218,15 +208,17 @@ const styles = StyleSheet.create({
     textTransform: "uppercase",
   },
   addBtn: {
-    width: 36,
-    height: 36,
+    width: 38,
+    height: 38,
+    borderRadius: 19,
+    backgroundColor: Colors.dark.accent,
     alignItems: "center",
     justifyContent: "center",
   },
+  addBtnLoading: { opacity: 0.5 },
+
   thumb: {
-    width: THUMB_SIZE,
-    height: THUMB_SIZE,
-    borderRadius: 3,
+    borderRadius: 10,
     overflow: "hidden",
     backgroundColor: Colors.dark.surface,
     position: "relative",
@@ -239,31 +231,43 @@ const styles = StyleSheet.create({
     justifyContent: "center",
   },
   overlayBtn: { position: "absolute" },
-  cropBtn: { bottom: 6, left: 6 },
-  removeBtn: { top: 6, right: 6 },
+  cropBtn: { bottom: 7, left: 7 },
+  removeBtn: { top: 7, right: 7 },
   overlayBtnInner: {
-    width: 22,
-    height: 22,
-    borderRadius: 11,
+    width: 26,
+    height: 26,
+    borderRadius: 13,
     backgroundColor: "rgba(0,0,0,0.72)",
     alignItems: "center",
     justifyContent: "center",
   },
+
   emptyState: {
     flex: 1,
     alignItems: "center",
     justifyContent: "center",
-    gap: 10,
+    gap: 12,
     paddingBottom: 80,
+    paddingHorizontal: 40,
+  },
+  emptyIcon: {
+    width: 72,
+    height: 72,
+    borderRadius: 36,
+    backgroundColor: Colors.dark.accentDim,
+    alignItems: "center",
+    justifyContent: "center",
+    marginBottom: 4,
   },
   emptyText: {
-    color: Colors.dark.textTertiary,
-    fontSize: 15,
-    fontFamily: "Inter_400Regular",
+    color: Colors.dark.textSecondary,
+    fontSize: 16,
+    fontFamily: "Inter_500Medium",
   },
   emptyHint: {
-    color: "rgba(255,255,255,0.2)",
-    fontSize: 12,
+    color: Colors.dark.textTertiary,
+    fontSize: 13,
     fontFamily: "Inter_400Regular",
+    textAlign: "center",
   },
 });

@@ -1,6 +1,7 @@
 import React, { useRef, useState } from "react";
 import { StyleSheet, Text, View } from "react-native";
 import Slider from "@react-native-community/slider";
+import Colors from "@/constants/colors";
 
 function formatTime(seconds: number): string {
   if (!isFinite(seconds) || seconds < 0) return "0:00";
@@ -28,17 +29,15 @@ export function SeekBar({ duration, position, onSeek }: Props) {
         minimumValue={0}
         maximumValue={duration > 0 ? duration : 1}
         value={dragging ? draggingVal.current : position}
-        onValueChange={(v) => {
-          draggingVal.current = v;
-        }}
+        onValueChange={(v) => { draggingVal.current = v; }}
         onSlidingStart={() => setDragging(true)}
         onSlidingComplete={(v) => {
           setDragging(false);
           onSeek(v);
         }}
-        minimumTrackTintColor="rgba(255,255,255,0.9)"
-        maximumTrackTintColor="rgba(255,255,255,0.15)"
-        thumbTintColor="#FFFFFF"
+        minimumTrackTintColor={Colors.dark.accent}
+        maximumTrackTintColor="rgba(255,255,255,0.12)"
+        thumbTintColor={Colors.dark.accentLight}
         tapToSeek
       />
       <View style={styles.labels}>
@@ -50,13 +49,8 @@ export function SeekBar({ duration, position, onSeek }: Props) {
 }
 
 const styles = StyleSheet.create({
-  wrapper: {
-    width: "100%",
-  },
-  slider: {
-    width: "100%",
-    height: 36,
-  },
+  wrapper: { width: "100%" },
+  slider: { width: "100%", height: 36 },
   labels: {
     flexDirection: "row",
     justifyContent: "space-between",
@@ -64,7 +58,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 4,
   },
   timeText: {
-    color: "rgba(255,255,255,0.4)",
+    color: Colors.dark.textTertiary,
     fontSize: 11,
     fontFamily: "Inter_400Regular",
     letterSpacing: 0.3,

@@ -1,11 +1,5 @@
 import * as Haptics from "expo-haptics";
-import {
-  Check,
-  ListMusic,
-  Music2,
-  Search,
-  X,
-} from "lucide-react-native";
+import { Check, ListMusic, Music2, Search, X } from "lucide-react-native";
 import React, {
   useCallback,
   useMemo,
@@ -29,13 +23,13 @@ import type { Song } from "@/context/MusicContext";
 import { useLayout } from "@/hooks/useLayout";
 import QueuePanel from "@/components/QueuePanel";
 
-// ── Alphabet index bar ────────────────────────────────────────────────────────
+// ─── Alphabet bar config ────────────────────────────────────────────────────
 const LETTERS = [
-  "#", "A", "B", "C", "D", "E", "F", "G", "H", "I", "J", "K", "L",
-  "M", "N", "O", "P", "Q", "R", "S", "T", "U", "V", "W", "X", "Y", "Z",
+  "#","A","B","C","D","E","F","G","H","I","J","K","L",
+  "M","N","O","P","Q","R","S","T","U","V","W","X","Y","Z",
 ];
-const STRIP_W = 18;
-const BUBBLE_SIZE = 42;
+const STRIP_W   = 26;   // touch-target width on the right edge
+const BUBBLE_SZ = 50;   // floating letter bubble diameter
 
 function firstLetterKey(title: string): string {
   const ch = title.trim()[0]?.toUpperCase() ?? "";
@@ -45,33 +39,33 @@ function firstLetterKey(title: string): string {
 export default function LibraryScreen() {
   const { topInset, bottomInset, tabBarH, isCompact } = useLayout();
   const {
-    songs,      // A-Z sorted master list — what the library displays
+    songs,
     currentSong,
     isSetupDone,
     playSongFromLibrary,
     removeSongs,
   } = useMusicContext();
 
-  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
-  const [selectMode, setSelectMode] = useState(false);
-  const [searchText, setSearchText] = useState("");
+  const [selectedIds, setSelectedIds]   = useState<Set<string>>(new Set());
+  const [selectMode,  setSelectMode]    = useState(false);
+  const [searchText,  setSearchText]    = useState("");
   const [searchActive, setSearchActive] = useState(false);
-  const [showQueue, setShowQueue] = useState(false);
+  const [showQueue,   setShowQueue]     = useState(false);
   const [activeLetter, setActiveLetter] = useState<string | null>(null);
-  const [bubbleY, setBubbleY] = useState(0);
+  const [bubbleY,      setBubbleY]      = useState(0);
 
-  const listRef = useRef<FlatList>(null);
-  const isListReady = useRef(false);
-  const searchRef = useRef<TextInput>(null);
+  // Header height — measured via onLayout so the strip starts below the header
+  const [headerH, setHeaderH] = useState(46);
 
-  // Alpha strip height from onLayout — no measure() needed
+  const listRef        = useRef<FlatList>(null);
+  const isListReady    = useRef(false);
+  const searchRef      = useRef<TextInput>(null);
   const stripHeightRef = useRef(0);
-  const lastHapticLetter = useRef<string | null>(null);
+  const lastHapticRef  = useRef<string | null>(null);
 
-  const itemHeight = isCompact ? 52 : 56;
+  const itemH = isCompact ? 56 : 64;
 
-  // ── Filtered list for search ──────────────────────────────────────────────
-  // Library always shows songs sorted A-Z (songs is the master A-Z list).
+  // ── Filtered songs ────────────────────────────────────────────────────────
   const displayedSongs = useMemo(() => {
     const q = searchText.trim().toLowerCase();
     if (!q) return songs;
@@ -82,25 +76,19 @@ export default function LibraryScreen() {
     );
   }, [songs, searchText]);
 
-  // Alpha bar is always visible when the library is shown without a search
-  // (songs are always A-Z so jumping by letter always makes sense)
   const showAlphaBar = !searchActive && displayedSongs.length > 0;
 
-  // ── Section map: first display-index per starting letter ─────────────────
+  // ── Section-first-index map ───────────────────────────────────────────────
   const sectionMap = useMemo(() => {
     const map = new Map<string, number>();
     displayedSongs.forEach((song, idx) => {
-      const letter = firstLetterKey(song.title);
-      if (!map.has(letter)) map.set(letter, idx);
+      const l = firstLetterKey(song.title);
+      if (!map.has(l)) map.set(l, idx);
     });
     return map;
   }, [displayedSongs]);
 
-  const availableLetters = useMemo(
-    () => new Set(sectionMap.keys()),
-    [sectionMap],
-  );
-
+  const availableLetters = useMemo(() => new Set(sectionMap.keys()), [sectionMap]);
   const sectionMapRef = useRef(sectionMap);
   sectionMapRef.current = sectionMap;
 
@@ -137,10 +125,7 @@ export default function LibraryScreen() {
     const count = selectedIds.size;
     Alert.alert(`Remove ${count} song${count > 1 ? "s" : ""}?`, undefined, [
       { text: "Cancel", style: "cancel" },
-      {
-        text: "Remove",
-        style: "destructive",
-        onPress: async () => {
+      { text: "Remove", style: "destructive", onPress: async () => {
           await removeSongs([...selectedIds]);
           exitSelectMode();
         },
@@ -148,7 +133,7 @@ export default function LibraryScreen() {
     ]);
   }, [selectedIds, removeSongs, exitSelectMode]);
 
-  // ── Search helpers ────────────────────────────────────────────────────────
+  // ── Search ────────────────────────────────────────────────────────────────
   const openSearch = useCallback(() => {
     setSearchActive(true);
     setTimeout(() => searchRef.current?.focus(), 80);
@@ -160,57 +145,44 @@ export default function LibraryScreen() {
     searchRef.current?.blur();
   }, []);
 
-  // ── Auto-scroll to current song in library (A-Z) ─────────────────────────
+  // ── Auto-scroll to current song on focus ──────────────────────────────────
   const scrollToCurrent = useCallback(() => {
     if (selectMode || searchActive) return;
     if (!listRef.current || !isListReady.current || !currentSong) return;
     const idx = songs.findIndex((s) => s.id === currentSong.id);
     if (idx > 0) {
-      listRef.current.scrollToIndex({
-        index: Math.max(0, idx - 2),
-        animated: true,
-      });
+      listRef.current.scrollToIndex({ index: Math.max(0, idx - 2), animated: true });
     }
   }, [songs, currentSong, selectMode, searchActive]);
 
-  const handleListLayout = useCallback(() => {
-    isListReady.current = true;
-    scrollToCurrent();
-  }, [scrollToCurrent]);
-
   useFocusEffect(
     useCallback(() => {
-      const timer = setTimeout(scrollToCurrent, 100);
-      return () => clearTimeout(timer);
+      const t = setTimeout(scrollToCurrent, 100);
+      return () => clearTimeout(t);
     }, [scrollToCurrent]),
   );
 
   // ── Alpha strip gesture ───────────────────────────────────────────────────
-  const handleStripTouch = useCallback(
-    (locationY: number) => {
-      if (stripHeightRef.current === 0) return;
-      const ratio = Math.max(0, Math.min(1, locationY / stripHeightRef.current));
-      const idx = Math.min(
-        Math.floor(ratio * LETTERS.length),
-        LETTERS.length - 1,
-      );
-      const letter = LETTERS[idx];
+  const handleStripTouch = useCallback((locationY: number) => {
+    if (stripHeightRef.current === 0) return;
+    const ratio = Math.max(0, Math.min(1, locationY / stripHeightRef.current));
+    const idx    = Math.min(Math.floor(ratio * LETTERS.length), LETTERS.length - 1);
+    const letter = LETTERS[idx];
 
-      if (letter !== lastHapticLetter.current) {
-        lastHapticLetter.current = letter;
-        if (sectionMapRef.current.has(letter)) Haptics.selectionAsync();
-      }
+    if (letter !== lastHapticRef.current) {
+      lastHapticRef.current = letter;
+      if (sectionMapRef.current.has(letter)) Haptics.selectionAsync();
+    }
 
-      setActiveLetter(letter);
-      setBubbleY(Math.max(0, locationY - BUBBLE_SIZE / 2));
+    setActiveLetter(letter);
+    // bubble center = touch position relative to the strip's top
+    setBubbleY(Math.max(0, locationY - BUBBLE_SZ / 2));
 
-      const targetIdx = sectionMapRef.current.get(letter);
-      if (targetIdx !== undefined) {
-        listRef.current?.scrollToIndex({ index: targetIdx, animated: false });
-      }
-    },
-    [],
-  );
+    const target = sectionMapRef.current.get(letter);
+    if (target !== undefined) {
+      listRef.current?.scrollToIndex({ index: target, animated: false });
+    }
+  }, []);
 
   const handleStripTouchRef = useRef(handleStripTouch);
   handleStripTouchRef.current = handleStripTouch;
@@ -218,40 +190,32 @@ export default function LibraryScreen() {
   const stripPanResponder = useRef(
     PanResponder.create({
       onStartShouldSetPanResponder: () => true,
-      onMoveShouldSetPanResponder: () => true,
-      onPanResponderGrant: (e) =>
-        handleStripTouchRef.current(e.nativeEvent.locationY),
-      onPanResponderMove: (e) =>
-        handleStripTouchRef.current(e.nativeEvent.locationY),
-      onPanResponderRelease: () => {
-        setActiveLetter(null);
-        lastHapticLetter.current = null;
-      },
-      onPanResponderTerminate: () => {
-        setActiveLetter(null);
-        lastHapticLetter.current = null;
-      },
+      onMoveShouldSetPanResponder:  () => true,
+      onPanResponderGrant:   (e) => handleStripTouchRef.current(e.nativeEvent.locationY),
+      onPanResponderMove:    (e) => handleStripTouchRef.current(e.nativeEvent.locationY),
+      onPanResponderRelease:    () => { setActiveLetter(null); lastHapticRef.current = null; },
+      onPanResponderTerminate:  () => { setActiveLetter(null); lastHapticRef.current = null; },
     }),
   ).current;
 
   // ── Song row ──────────────────────────────────────────────────────────────
   const renderItem = useCallback(
     ({ item }: { item: Song }) => {
-      const isActive = item.id === currentSong?.id;
+      const isActive   = item.id === currentSong?.id;
       const isSelected = selectedIds.has(item.id);
 
       return (
         <TouchableOpacity
           style={[
             styles.row,
-            { height: itemHeight, paddingVertical: isCompact ? 8 : 10 },
+            { height: itemH },
             isActive && !selectMode && styles.rowActive,
             isSelected && styles.rowSelected,
           ]}
           onPress={() => handlePress(item)}
           onLongPress={() => handleLongPress(item.id)}
           delayLongPress={350}
-          activeOpacity={0.6}
+          activeOpacity={0.65}
         >
           {selectMode && (
             <View style={[styles.checkbox, isSelected && styles.checkboxSelected]}>
@@ -280,20 +244,24 @@ export default function LibraryScreen() {
         </TouchableOpacity>
       );
     },
-    [
-      currentSong, selectedIds, selectMode,
-      handlePress, handleLongPress, itemHeight, isCompact,
-    ],
+    [currentSong, selectedIds, selectMode, handlePress, handleLongPress, itemH, isCompact],
   );
 
-  const listBottomPad = bottomInset + tabBarH + 16 + (selectMode ? 72 : 0);
-  const letterSize = isCompact ? 9 : 10;
+  const listBottomPad  = bottomInset + tabBarH + 16 + (selectMode ? 72 : 0);
+  const letterSz       = isCompact ? 10 : 11;
+
+  // The strip occupies: from just below the header, to the bottom safe area
+  const stripTop    = headerH;
+  const stripBottom = tabBarH + bottomInset;
 
   return (
     <View style={[styles.container, { paddingTop: topInset }]}>
 
       {/* ── Header ── */}
-      <View style={[styles.header, isCompact && styles.headerCompact]}>
+      <View
+        style={[styles.header, isCompact && styles.headerCompact]}
+        onLayout={(e) => setHeaderH(e.nativeEvent.layout.height)}
+      >
         {selectMode ? (
           <>
             <Text style={styles.headerCount}>{selectedIds.size} selected</Text>
@@ -306,30 +274,24 @@ export default function LibraryScreen() {
             <Text style={styles.headerCount}>
               {songs.length > 0
                 ? searchActive && displayedSongs.length !== songs.length
-                  ? `${displayedSongs.length} of ${songs.length} songs`
+                  ? `${displayedSongs.length} / ${songs.length}`
                   : `${songs.length} songs`
                 : ""}
             </Text>
             <View style={styles.headerActions}>
               <TouchableOpacity
                 onPress={openSearch}
-                style={styles.headerBtn}
+                style={styles.iconCircle}
                 hitSlop={8}
               >
-                <Search
-                  size={isCompact ? 16 : 18}
-                  color={Colors.dark.textTertiary}
-                />
+                <Search size={isCompact ? 15 : 16} color={Colors.dark.textSecondary} />
               </TouchableOpacity>
               <TouchableOpacity
                 onPress={() => setShowQueue(true)}
-                style={styles.headerBtn}
+                style={styles.iconCircle}
                 hitSlop={8}
               >
-                <ListMusic
-                  size={isCompact ? 16 : 18}
-                  color={Colors.dark.textTertiary}
-                />
+                <ListMusic size={isCompact ? 15 : 16} color={Colors.dark.textSecondary} />
               </TouchableOpacity>
             </View>
           </>
@@ -343,28 +305,33 @@ export default function LibraryScreen() {
           <TextInput
             ref={searchRef}
             style={[styles.searchInput, isCompact && styles.searchInputCompact]}
-            placeholder="Song title or artist…"
+            placeholder="Title or artist…"
             placeholderTextColor={Colors.dark.textTertiary}
             value={searchText}
             onChangeText={setSearchText}
             autoCorrect={false}
             returnKeyType="search"
           />
-          <TouchableOpacity onPress={closeSearch} hitSlop={8}>
+          <TouchableOpacity onPress={closeSearch} hitSlop={10}>
             <X size={16} color={Colors.dark.textTertiary} />
           </TouchableOpacity>
         </View>
       )}
 
+      {/* ── Song list ── */}
       {!isSetupDone || songs.length === 0 ? (
         <View style={styles.empty}>
-          <Music2 size={40} color={Colors.dark.textTertiary} />
+          <View style={styles.emptyIcon}>
+            <Music2 size={32} color={Colors.dark.accent} />
+          </View>
           <Text style={styles.emptyText}>No songs loaded</Text>
+          <Text style={styles.emptyHint}>Scan your device from the Player tab</Text>
         </View>
       ) : displayedSongs.length === 0 ? (
         <View style={styles.empty}>
-          <Search size={36} color={Colors.dark.textTertiary} />
-          <Text style={styles.emptyText}>No results for "{searchText}"</Text>
+          <Search size={32} color={Colors.dark.textTertiary} />
+          <Text style={styles.emptyText}>No results</Text>
+          <Text style={styles.emptyHint}>"{searchText}"</Text>
         </View>
       ) : (
         <FlatList
@@ -374,15 +341,18 @@ export default function LibraryScreen() {
           renderItem={renderItem}
           contentContainerStyle={{
             paddingBottom: listBottomPad,
-            paddingRight: showAlphaBar ? STRIP_W + 4 : 0,
+            paddingRight: showAlphaBar ? STRIP_W + 6 : 0,
           }}
           showsVerticalScrollIndicator={false}
           getItemLayout={(_, index) => ({
-            length: itemHeight,
-            offset: itemHeight * index,
+            length: itemH,
+            offset: itemH * index,
             index,
           })}
-          onLayout={handleListLayout}
+          onLayout={() => {
+            isListReady.current = true;
+            scrollToCurrent();
+          }}
           onScrollToIndexFailed={({ index }) => {
             setTimeout(() => {
               listRef.current?.scrollToIndex({
@@ -395,28 +365,40 @@ export default function LibraryScreen() {
         />
       )}
 
-      {/* ── Alphabet index strip (always shown when not searching) ── */}
+      {/* ── Alpha index strip ── */}
       {showAlphaBar && (
         <View
-          style={styles.alphaStrip}
-          onLayout={(e) => {
-            stripHeightRef.current = e.nativeEvent.layout.height;
-          }}
+          style={[
+            styles.alphaStrip,
+            {
+              top: stripTop,
+              bottom: stripBottom,
+              width: STRIP_W,
+            },
+          ]}
+          onLayout={(e) => { stripHeightRef.current = e.nativeEvent.layout.height; }}
           {...stripPanResponder.panHandlers}
         >
           {LETTERS.map((letter) => {
             const available = availableLetters.has(letter);
-            const isActive = activeLetter === letter;
+            const isActive  = activeLetter === letter;
             return (
               <View key={letter} style={styles.alphaSlot}>
                 {isActive ? (
-                  <View style={styles.alphaDot} />
+                  // Active: small filled pill so the user can see which letter is selected
+                  <View style={styles.alphaPillActive}>
+                    <Text style={[styles.alphaLetterActive, { fontSize: letterSz + 1 }]}>
+                      {letter}
+                    </Text>
+                  </View>
                 ) : (
                   <Text
                     style={[
                       styles.alphaLetter,
-                      { fontSize: letterSize },
-                      available ? styles.alphaAvailable : styles.alphaUnavailable,
+                      { fontSize: letterSz },
+                      available
+                        ? styles.alphaAvailable
+                        : styles.alphaUnavailable,
                     ]}
                   >
                     {letter}
@@ -428,13 +410,22 @@ export default function LibraryScreen() {
         </View>
       )}
 
-      {/* Letter bubble — floats beside the strip while dragging */}
+      {/* ── Letter bubble (floats beside strip while dragging) ── */}
       {activeLetter !== null && (
         <View
-          style={[styles.alphaBubble, { top: bubbleY, right: STRIP_W + 10 }]}
+          style={[
+            styles.bubble,
+            {
+              top:   topInset + stripTop + bubbleY,
+              right: STRIP_W + 16,
+              width: BUBBLE_SZ,
+              height: BUBBLE_SZ,
+              borderRadius: BUBBLE_SZ / 2,
+            },
+          ]}
           pointerEvents="none"
         >
-          <Text style={styles.alphaBubbleText}>{activeLetter}</Text>
+          <Text style={styles.bubbleText}>{activeLetter}</Text>
         </View>
       )}
 
@@ -453,7 +444,7 @@ export default function LibraryScreen() {
             ]}
             onPress={handleRemove}
             disabled={selectedIds.size === 0}
-            activeOpacity={0.7}
+            activeOpacity={0.75}
           >
             <Text style={styles.removeBtnText}>
               Remove {selectedIds.size > 0 ? selectedIds.size : ""}
@@ -462,11 +453,8 @@ export default function LibraryScreen() {
         </View>
       )}
 
-      {/* ── Playback queue slide-up panel ── */}
-      <QueuePanel
-        visible={showQueue}
-        onClose={() => setShowQueue(false)}
-      />
+      {/* ── Queue panel ── */}
+      <QueuePanel visible={showQueue} onClose={() => setShowQueue(false)} />
     </View>
   );
 }
@@ -474,15 +462,16 @@ export default function LibraryScreen() {
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: Colors.dark.background },
 
+  // ── Header ──────────────────────────────────────────────────────────────
   header: {
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
     paddingHorizontal: 24,
-    paddingTop: 8,
+    paddingTop: 10,
     paddingBottom: 10,
   },
-  headerCompact: { paddingTop: 4, paddingBottom: 6 },
+  headerCompact: { paddingTop: 6, paddingBottom: 6 },
   headerCount: {
     color: Colors.dark.textTertiary,
     fontSize: 12,
@@ -493,13 +482,21 @@ const styles = StyleSheet.create({
   headerActions: {
     flexDirection: "row",
     alignItems: "center",
-    gap: 4,
+    gap: 8,
   },
-  headerBtn: { padding: 4 },
+  headerBtn: { padding: 6 },
   cancelText: {
     color: Colors.dark.textSecondary,
     fontSize: 14,
     fontFamily: "Inter_400Regular",
+  },
+  iconCircle: {
+    width: 34,
+    height: 34,
+    borderRadius: 17,
+    backgroundColor: Colors.dark.surface,
+    alignItems: "center",
+    justifyContent: "center",
   },
 
   // ── Search bar ──────────────────────────────────────────────────────────
@@ -508,13 +505,15 @@ const styles = StyleSheet.create({
     alignItems: "center",
     marginHorizontal: 16,
     marginBottom: 8,
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-    backgroundColor: "rgba(255,255,255,0.07)",
-    borderRadius: 10,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    backgroundColor: Colors.dark.surface,
+    borderRadius: 14,
     gap: 8,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: Colors.dark.border,
   },
-  searchRowCompact: { marginBottom: 6, paddingVertical: 6 },
+  searchRowCompact: { paddingVertical: 7, marginBottom: 6 },
   searchInput: {
     flex: 1,
     color: Colors.dark.text,
@@ -530,13 +529,16 @@ const styles = StyleSheet.create({
     alignItems: "center",
     paddingHorizontal: 24,
     gap: 14,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: Colors.dark.border,
   },
-  rowActive: { backgroundColor: "rgba(255,255,255,0.04)" },
-  rowSelected: { backgroundColor: "rgba(108,99,255,0.08)" },
+  rowActive: { backgroundColor: "rgba(108,99,255,0.07)" },
+  rowSelected: { backgroundColor: "rgba(108,99,255,0.12)" },
+
   checkbox: {
-    width: 20,
-    height: 20,
-    borderRadius: 10,
+    width: 22,
+    height: 22,
+    borderRadius: 11,
     borderWidth: 1.5,
     borderColor: Colors.dark.textTertiary,
     alignItems: "center",
@@ -547,6 +549,7 @@ const styles = StyleSheet.create({
     backgroundColor: Colors.dark.accent,
     borderColor: Colors.dark.accent,
   },
+
   rowText: { flex: 1 },
   title: {
     color: Colors.dark.textSecondary,
@@ -554,17 +557,17 @@ const styles = StyleSheet.create({
     fontFamily: "Inter_500Medium",
   },
   titleCompact: { fontSize: 14 },
-  titleActive: { color: Colors.dark.text },
+  titleActive: { color: Colors.dark.text, fontFamily: "Inter_600SemiBold" },
   artist: {
     color: Colors.dark.textTertiary,
     fontSize: 12,
     fontFamily: "Inter_400Regular",
-    marginTop: 2,
+    marginTop: 3,
   },
-  artistCompact: { fontSize: 11, marginTop: 1 },
+  artistCompact: { fontSize: 11, marginTop: 2 },
   activeBar: {
     width: 3,
-    height: 18,
+    height: 20,
     borderRadius: 2,
     backgroundColor: Colors.dark.accent,
   },
@@ -576,13 +579,27 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     gap: 12,
     paddingBottom: 80,
+    paddingHorizontal: 40,
+  },
+  emptyIcon: {
+    width: 72,
+    height: 72,
+    borderRadius: 36,
+    backgroundColor: Colors.dark.accentDim,
+    alignItems: "center",
+    justifyContent: "center",
+    marginBottom: 4,
   },
   emptyText: {
+    color: Colors.dark.textSecondary,
+    fontSize: 16,
+    fontFamily: "Inter_500Medium",
+  },
+  emptyHint: {
     color: Colors.dark.textTertiary,
-    fontSize: 15,
+    fontSize: 13,
     fontFamily: "Inter_400Regular",
     textAlign: "center",
-    paddingHorizontal: 32,
   },
 
   // ── Select mode action bar ──────────────────────────────────────────────
@@ -591,15 +608,15 @@ const styles = StyleSheet.create({
     left: 0,
     right: 0,
     paddingHorizontal: 24,
-    paddingTop: 12,
+    paddingTop: 14,
     backgroundColor: Colors.dark.background,
     borderTopWidth: StyleSheet.hairlineWidth,
     borderTopColor: Colors.dark.border,
   },
   removeBtn: {
     backgroundColor: Colors.dark.danger,
-    borderRadius: 4,
-    paddingVertical: 14,
+    borderRadius: 50,
+    paddingVertical: 15,
     alignItems: "center",
   },
   removeBtnDisabled: { opacity: 0.4 },
@@ -609,16 +626,13 @@ const styles = StyleSheet.create({
     fontFamily: "Inter_600SemiBold",
   },
 
-  // ── Alpha strip ─────────────────────────────────────────────────────────
+  // ── Alpha index strip ───────────────────────────────────────────────────
   alphaStrip: {
     position: "absolute",
     right: 0,
-    top: 0,
-    bottom: 0,
-    width: STRIP_W,
     alignItems: "center",
     justifyContent: "space-between",
-    paddingVertical: 6,
+    paddingVertical: 4,
     zIndex: 10,
   },
   alphaSlot: {
@@ -626,36 +640,48 @@ const styles = StyleSheet.create({
     width: STRIP_W,
     alignItems: "center",
     justifyContent: "center",
-    minHeight: 8,
+    minHeight: 10,
   },
   alphaLetter: {
-    fontFamily: "Inter_500Medium",
-    lineHeight: 12,
+    fontFamily: "Inter_600SemiBold",
+    lineHeight: 13,
+    textAlign: "center",
   },
-  alphaAvailable: { color: "rgba(255,255,255,0.55)" },
-  alphaUnavailable: { color: "rgba(255,255,255,0.14)" },
-  alphaDot: {
-    width: 5,
-    height: 5,
-    borderRadius: 2.5,
+  alphaAvailable:   { color: "rgba(255,255,255,0.6)" },
+  alphaUnavailable: { color: "rgba(255,255,255,0.15)" },
+
+  // Active state: pill with accent background
+  alphaPillActive: {
+    width: 22,
+    height: 22,
+    borderRadius: 11,
     backgroundColor: Colors.dark.accent,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  alphaLetterActive: {
+    color: "#fff",
+    fontFamily: "Inter_700Bold",
+    lineHeight: 14,
+    textAlign: "center",
   },
 
-  // ── Bubble popup ────────────────────────────────────────────────────────
-  alphaBubble: {
+  // ── Letter bubble ───────────────────────────────────────────────────────
+  bubble: {
     position: "absolute",
-    width: BUBBLE_SIZE,
-    height: BUBBLE_SIZE,
-    borderRadius: BUBBLE_SIZE / 2,
     backgroundColor: Colors.dark.accent,
     alignItems: "center",
     justifyContent: "center",
     zIndex: 20,
-    elevation: 8,
+    elevation: 10,
+    shadowColor: Colors.dark.accent,
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.4,
+    shadowRadius: 8,
   },
-  alphaBubbleText: {
+  bubbleText: {
     color: "#fff",
-    fontSize: 18,
+    fontSize: 22,
     fontFamily: "Inter_700Bold",
   },
 });

@@ -25,20 +25,26 @@ export function SetupScreen({ onScan, isLoading }: Props) {
         { paddingTop: topInset, paddingBottom: controlsBottomPad },
       ]}
     >
-      <ScanSearch size={48} color={Colors.dark.textTertiary} />
-      <Text style={styles.title}>Music Player</Text>
+      <View style={styles.iconRing}>
+        <ScanSearch size={36} color={Colors.dark.accent} />
+      </View>
+
+      <View style={styles.textBlock}>
+        <Text style={styles.title}>Music Player</Text>
+        <Text style={styles.subtitle}>Scan your device to get started</Text>
+      </View>
 
       <TouchableOpacity
-        style={[styles.button, isLoading && { opacity: 0.5 }]}
+        style={[styles.button, isLoading && styles.buttonLoading]}
         onPress={onScan}
-        activeOpacity={0.7}
+        activeOpacity={0.8}
         disabled={isLoading}
       >
         {isLoading ? (
-          <ActivityIndicator color={Colors.dark.background} />
+          <ActivityIndicator color="#fff" />
         ) : (
           <>
-            <ScanSearch size={20} color={Colors.dark.background} />
+            <ScanSearch size={20} color="#fff" />
             <Text style={styles.buttonText}>Scan device</Text>
           </>
         )}
@@ -53,27 +59,49 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
     backgroundColor: Colors.dark.background,
-    paddingHorizontal: 32,
-    gap: 24,
+    paddingHorizontal: 40,
+    gap: 20,
+  },
+  iconRing: {
+    width: 88,
+    height: 88,
+    borderRadius: 44,
+    backgroundColor: Colors.dark.accentDim,
+    alignItems: "center",
+    justifyContent: "center",
+    borderWidth: 1.5,
+    borderColor: "rgba(108,99,255,0.3)",
+  },
+  textBlock: {
+    alignItems: "center",
+    gap: 8,
   },
   title: {
-    fontSize: 22,
-    fontFamily: "Inter_500Medium",
-    color: Colors.dark.textSecondary,
+    fontSize: 24,
+    fontFamily: "Inter_700Bold",
+    color: Colors.dark.text,
+    letterSpacing: -0.3,
+  },
+  subtitle: {
+    fontSize: 14,
+    fontFamily: "Inter_400Regular",
+    color: Colors.dark.textTertiary,
   },
   button: {
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "center",
     gap: 10,
-    backgroundColor: Colors.dark.text,
+    backgroundColor: Colors.dark.accent,
     paddingVertical: 16,
-    paddingHorizontal: 32,
-    borderRadius: 4,
-    marginTop: 8,
+    paddingHorizontal: 40,
+    borderRadius: 50,
+    marginTop: 12,
+    minWidth: 200,
   },
+  buttonLoading: { opacity: 0.6 },
   buttonText: {
-    color: Colors.dark.background,
+    color: "#fff",
     fontSize: 16,
     fontFamily: "Inter_600SemiBold",
   },
