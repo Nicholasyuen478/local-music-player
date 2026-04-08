@@ -222,19 +222,6 @@ export default function PlayerScreen() {
             <Library size={18} color="#fff" />
             <Text style={styles.browseBtnText}>Browse Library</Text>
           </TouchableOpacity>
-
-          {/* Secondary: scan inline */}
-          <TouchableOpacity
-            onPress={handleScan}
-            disabled={isScanning || isLoading}
-            activeOpacity={0.7}
-            style={styles.scanLink}
-          >
-            <ScanSearch size={14} color={Colors.dark.textTertiary} />
-            <Text style={styles.scanLinkText}>
-              {isScanning || isLoading ? "Scanning…" : "Scan device"}
-            </Text>
-          </TouchableOpacity>
         </View>
       </View>
     );
@@ -574,16 +561,5 @@ const styles = StyleSheet.create({
     color: "#fff",
     fontSize: 16,
     fontFamily: "Inter_600SemiBold",
-  },
-  scanLink: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 6,
-    paddingVertical: 8,
-  },
-  scanLinkText: {
-    color: Colors.dark.textTertiary,
-    fontSize: 13,
-    fontFamily: "Inter_400Regular",
   },
 });
