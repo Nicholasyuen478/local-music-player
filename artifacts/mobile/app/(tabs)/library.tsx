@@ -1,9 +1,8 @@
 import * as Haptics from "expo-haptics";
-import { Check, ListMusic, Music2, Search, X } from "lucide-react-native";
+import { Check, Clock, ListMusic, Music2, Search, Users, X } from "lucide-react-native";
 import { router, useFocusEffect } from "expo-router";
 import React, {
   useCallback,
-  useEffect,
   useMemo,
   useRef,
   useState,
@@ -11,7 +10,6 @@ import React, {
 import {
   Alert,
   FlatList,
-  PanResponder,
   StyleSheet,
   Text,
   TextInput,
@@ -24,18 +22,13 @@ import type { Song } from "@/context/MusicContext";
 import { useLayout } from "@/hooks/useLayout";
 import QueuePanel from "@/components/QueuePanel";
 
-// ─── Alphabet strip config ──────────────────────────────────────────────────
-const LETTERS = [
-  "#","A","B","C","D","E","F","G","H","I","J","K","L",
-  "M","N","O","P","Q","R","S","T","U","V","W","X","Y","Z",
-];
-const STRIP_W   = 28;    // wider → easier to grab
-const BUBBLE_SZ = 52;    // floating letter popup
+// ─── Filter modes ────────────────────────────────────────────────────────────
+type FilterMode = "songs" | "artists" | "recent";
 
-function firstLetterKey(title: string): string {
-  const ch = title.trim()[0]?.toUpperCase() ?? "";
-  return /^[A-Z]$/.test(ch) ? ch : "#";
-}
+// ─── Row types (flat array driving the FlatList) ──────────────────────────────
+type SectionRow = { kind: "section"; artist: string; key: string };
+type SongRow    = { kind: "song";    data: Song;    key: string };
+type ListRow    = SectionRow | SongRow;
 
 export default function LibraryScreen() {
   const { topInset, bottomInset, tabBarH, isCompact } = useLayout();
@@ -43,32 +36,26 @@ export default function LibraryScreen() {
     songs,
     currentSong,
     isSetupDone,
+    recentlyPlayed,
     playSongFromLibrary,
     removeSongs,
   } = useMusicContext();
 
+  const [filterMode,   setFilterMode]   = useState<FilterMode>("songs");
   const [selectedIds,  setSelectedIds]  = useState<Set<string>>(new Set());
   const [selectMode,   setSelectMode]   = useState(false);
   const [searchText,   setSearchText]   = useState("");
   const [searchActive, setSearchActive] = useState(false);
   const [showQueue,    setShowQueue]    = useState(false);
-  const [activeLetter, setActiveLetter] = useState<string | null>(null);
-  const [bubbleY,      setBubbleY]      = useState(0);
 
-  // ── Refs ────────────────────────────────────────────────────────────────
-  const listRef        = useRef<FlatList>(null);
-  const isListReady    = useRef(false);
-  const searchRef      = useRef<TextInput>(null);
-  // Height of the alphabet strip itself (set by onLayout) — used by PanResponder
-  const stripHeightRef = useRef(0);
-  const lastHapticRef  = useRef<string | null>(null);
-  // Measured height of the sticky area ABOVE the list (header + optional search bar)
-  // Used to position the strip's top edge correctly.
-  const aboveListHRef  = useRef(0);
+  const listRef     = useRef<FlatList>(null);
+  const isListReady = useRef(false);
+  const searchRef   = useRef<TextInput>(null);
 
-  const itemH = isCompact ? 56 : 64;
+  const itemH       = isCompact ? 56 : 64;
+  const sectionH    = isCompact ? 34 : 40;  // artist section header height
 
-  // ── Filtered songs ──────────────────────────────────────────────────────
+  // ── Filtered songs (search applied) ────────────────────────────────────
   const displayedSongs = useMemo(() => {
     const q = searchText.trim().toLowerCase();
     if (!q) return songs;
@@ -79,21 +66,79 @@ export default function LibraryScreen() {
     );
   }, [songs, searchText]);
 
-  const showAlphaBar = !searchActive && displayedSongs.length > 0;
+  // ── List rows based on current filter mode ──────────────────────────────
+  const listRows = useMemo<ListRow[]>(() => {
+    if (filterMode === "songs") {
+      return displayedSongs.map((s) => ({ kind: "song", data: s, key: s.id }));
+    }
 
-  // ── Section-first-index map ─────────────────────────────────────────────
-  const sectionMap = useMemo(() => {
-    const map = new Map<string, number>();
-    displayedSongs.forEach((song, idx) => {
-      const l = firstLetterKey(song.title);
-      if (!map.has(l)) map.set(l, idx);
-    });
-    return map;
-  }, [displayedSongs]);
+    if (filterMode === "artists") {
+      const q = searchText.trim().toLowerCase();
+      // In Artists mode search filters by artist name
+      const source = q
+        ? songs.filter((s) => s.artist.toLowerCase().includes(q) || s.title.toLowerCase().includes(q))
+        : songs;
+      // Sort: artist A-Z, then title A-Z within same artist
+      const sorted = [...source].sort((a, b) => {
+        const c = a.artist.localeCompare(b.artist, undefined, { sensitivity: "base" });
+        return c !== 0 ? c : a.title.localeCompare(b.title, undefined, { sensitivity: "base" });
+      });
+      const rows: ListRow[] = [];
+      let lastArtist = "";
+      for (const song of sorted) {
+        if (song.artist !== lastArtist) {
+          rows.push({ kind: "section", artist: song.artist, key: `hdr-${song.artist}` });
+          lastArtist = song.artist;
+        }
+        rows.push({ kind: "song", data: song, key: song.id });
+      }
+      return rows;
+    }
 
-  const availableLetters = useMemo(() => new Set(sectionMap.keys()), [sectionMap]);
-  const sectionMapRef    = useRef(sectionMap);
-  sectionMapRef.current  = sectionMap;
+    if (filterMode === "recent") {
+      const q = searchText.trim().toLowerCase();
+      const filtered = q
+        ? recentlyPlayed.filter(
+            (s) =>
+              s.title.toLowerCase().includes(q) ||
+              s.artist.toLowerCase().includes(q),
+          )
+        : recentlyPlayed;
+      return filtered.map((s) => ({ kind: "song", data: s, key: `recent-${s.id}` }));
+    }
+
+    return [];
+  }, [filterMode, displayedSongs, songs, recentlyPlayed, searchText]);
+
+  // Indices of section-header rows for sticky behaviour in Artists mode
+  const stickyHeaderIndices = useMemo(() => {
+    if (filterMode !== "artists") return [];
+    return listRows.reduce<number[]>((acc, row, idx) => {
+      if (row.kind === "section") acc.push(idx);
+      return acc;
+    }, []);
+  }, [listRows, filterMode]);
+
+  // ── Header count string ─────────────────────────────────────────────────
+  const headerCount = useMemo(() => {
+    if (filterMode === "songs") {
+      const n = searchActive ? displayedSongs.length : songs.length;
+      return n > 0
+        ? searchActive && displayedSongs.length !== songs.length
+          ? `${displayedSongs.length} / ${songs.length}`
+          : `${songs.length} songs`
+        : "";
+    }
+    if (filterMode === "artists") {
+      const artistSet = new Set(listRows.flatMap((r) => (r.kind === "song" ? [r.data.artist] : [])));
+      const n = artistSet.size;
+      return n > 0 ? `${n} artist${n !== 1 ? "s" : ""}` : "";
+    }
+    if (filterMode === "recent") {
+      return recentlyPlayed.length > 0 ? `${recentlyPlayed.length} recent` : "";
+    }
+    return "";
+  }, [filterMode, displayedSongs, songs, recentlyPlayed, listRows, searchActive]);
 
   // ── Select mode ─────────────────────────────────────────────────────────
   const exitSelectMode = useCallback(() => {
@@ -151,15 +196,16 @@ export default function LibraryScreen() {
     searchRef.current?.blur();
   }, []);
 
-  // ── Auto-scroll to current song on focus ────────────────────────────────
+  // ── Auto-scroll to current song (Songs mode only) ───────────────────────
   const scrollToCurrent = useCallback(() => {
+    if (filterMode !== "songs") return;
     if (selectMode || searchActive) return;
     if (!listRef.current || !isListReady.current || !currentSong) return;
     const idx = songs.findIndex((s) => s.id === currentSong.id);
     if (idx > 0) {
       listRef.current.scrollToIndex({ index: Math.max(0, idx - 2), animated: true });
     }
-  }, [songs, currentSong, selectMode, searchActive]);
+  }, [songs, currentSong, filterMode, selectMode, searchActive]);
 
   useFocusEffect(
     useCallback(() => {
@@ -168,60 +214,15 @@ export default function LibraryScreen() {
     }, [scrollToCurrent]),
   );
 
-  // ── Strip gesture (PanResponder) ────────────────────────────────────────
-  //
-  // locationY is relative to the STRIP view's own origin — no measure() needed.
-  //
-  const handleStripTouch = useCallback((locationY: number) => {
-    if (stripHeightRef.current === 0) return;
-
-    const ratio  = Math.max(0, Math.min(1, locationY / stripHeightRef.current));
-    const idx    = Math.min(Math.floor(ratio * LETTERS.length), LETTERS.length - 1);
-    const letter = LETTERS[idx];
-
-    // Haptic only when letter changes
-    if (letter !== lastHapticRef.current) {
-      lastHapticRef.current = letter;
-      if (sectionMapRef.current.has(letter)) Haptics.selectionAsync();
-    }
-
-    // Position bubble relative to strip top — clamped so it stays in view
-    const clampedY = Math.max(0, Math.min(
-      locationY - BUBBLE_SZ / 2,
-      stripHeightRef.current - BUBBLE_SZ,
-    ));
-    setActiveLetter(letter);
-    setBubbleY(clampedY);
-
-    const target = sectionMapRef.current.get(letter);
-    if (target !== undefined) {
-      listRef.current?.scrollToIndex({ index: target, animated: false });
-    }
-  }, []);
-
-  // Keep ref in sync so PanResponder callbacks always have the latest version
-  const handleStripTouchRef    = useRef(handleStripTouch);
-  handleStripTouchRef.current  = handleStripTouch;
-
-  const stripPanResponder = useRef(
-    PanResponder.create({
-      onStartShouldSetPanResponder: () => true,
-      onMoveShouldSetPanResponder:  () => true,
-      onPanResponderGrant:     (e) => handleStripTouchRef.current(e.nativeEvent.locationY),
-      onPanResponderMove:      (e) => handleStripTouchRef.current(e.nativeEvent.locationY),
-      onPanResponderRelease:   ()  => { setActiveLetter(null); lastHapticRef.current = null; },
-      onPanResponderTerminate: ()  => { setActiveLetter(null); lastHapticRef.current = null; },
-    }),
-  ).current;
-
-  // ── Song row ────────────────────────────────────────────────────────────
-  const renderItem = useCallback(
-    ({ item }: { item: Song }) => {
+  // ── Row renderers ───────────────────────────────────────────────────────
+  const renderSongRow = useCallback(
+    (item: Song, customKey?: string) => {
       const isActive   = item.id === currentSong?.id;
       const isSelected = selectedIds.has(item.id);
 
       return (
         <TouchableOpacity
+          key={customKey ?? item.id}
           style={[
             styles.row,
             { height: itemH },
@@ -263,97 +264,122 @@ export default function LibraryScreen() {
     [currentSong, selectedIds, selectMode, handlePress, handleLongPress, itemH, isCompact],
   );
 
-  const listPaddingRight = showAlphaBar ? STRIP_W + 2 : 0;
-  const listBottomPad    = bottomInset + tabBarH + 16 + (selectMode ? 72 : 0);
+  const renderRow = useCallback(
+    ({ item }: { item: ListRow }) => {
+      if (item.kind === "section") {
+        return (
+          <View style={[styles.sectionHeader, { height: sectionH }]}>
+            <Text style={[styles.sectionText, isCompact && styles.sectionTextCompact]} numberOfLines={1}>
+              {item.artist}
+            </Text>
+          </View>
+        );
+      }
+      return renderSongRow(item.data, item.key);
+    },
+    [renderSongRow, sectionH, isCompact],
+  );
 
-  // Strip position: top = header (+ optional search bar) height, measured dynamically
-  const [aboveListH, setAboveListH] = useState(46);
-  const stripBottom = tabBarH + bottomInset;
+  // getItemLayout only for uniform-height modes
+  const getItemLayout = useMemo(() => {
+    if (filterMode === "artists") return undefined;
+    return (_: unknown, index: number) => ({
+      length: itemH,
+      offset: itemH * index,
+      index,
+    });
+  }, [filterMode, itemH]);
 
-  const letterFontSz = isCompact ? 10 : 11;
+  const listBottomPad = bottomInset + tabBarH + 16 + (selectMode ? 72 : 0);
 
   return (
     <View style={[styles.container, { paddingTop: topInset }]}>
 
-      {/* ── Sticky area above the list (header + search) ── */}
-      <View
-        onLayout={(e) => {
-          const h = e.nativeEvent.layout.height;
-          setAboveListH(h);
-          aboveListHRef.current = h;
-        }}
-      >
-        {/* Header */}
-        <View style={[styles.header, isCompact && styles.headerCompact]}>
-          {selectMode ? (
-            <>
-              <Text style={styles.headerCount}>{selectedIds.size} selected</Text>
-              <TouchableOpacity onPress={exitSelectMode} style={styles.headerBtn}>
-                <Text style={styles.cancelText}>Cancel</Text>
-              </TouchableOpacity>
-            </>
-          ) : (
-            <>
-              <Text style={styles.headerCount}>
-                {songs.length > 0
-                  ? searchActive && displayedSongs.length !== songs.length
-                    ? `${displayedSongs.length} / ${songs.length}`
-                    : `${songs.length} songs`
-                  : ""}
-              </Text>
-              <View style={styles.headerActions}>
-                {/* Back to Player */}
-                <TouchableOpacity
-                  onPress={() => router.navigate("/(tabs)/")}
-                  style={styles.iconCircle}
-                  hitSlop={8}
-                >
-                  <Music2
-                    size={isCompact ? 15 : 16}
-                    color={currentSong ? Colors.dark.accent : Colors.dark.textSecondary}
-                  />
-                </TouchableOpacity>
-                <TouchableOpacity
-                  onPress={openSearch}
-                  style={styles.iconCircle}
-                  hitSlop={8}
-                >
-                  <Search size={isCompact ? 15 : 16} color={Colors.dark.textSecondary} />
-                </TouchableOpacity>
-                <TouchableOpacity
-                  onPress={() => setShowQueue(true)}
-                  style={styles.iconCircle}
-                  hitSlop={8}
-                >
-                  <ListMusic size={isCompact ? 15 : 16} color={Colors.dark.textSecondary} />
-                </TouchableOpacity>
-              </View>
-            </>
-          )}
-        </View>
-
-        {/* Search bar */}
-        {searchActive && (
-          <View style={[styles.searchRow, isCompact && styles.searchRowCompact]}>
-            <Search size={14} color={Colors.dark.textTertiary} />
-            <TextInput
-              ref={searchRef}
-              style={[styles.searchInput, isCompact && styles.searchInputCompact]}
-              placeholder="Title or artist…"
-              placeholderTextColor={Colors.dark.textTertiary}
-              value={searchText}
-              onChangeText={setSearchText}
-              autoCorrect={false}
-              returnKeyType="search"
-            />
-            <TouchableOpacity onPress={closeSearch} hitSlop={10}>
-              <X size={16} color={Colors.dark.textTertiary} />
+      {/* ── Header ── */}
+      <View style={[styles.header, isCompact && styles.headerCompact]}>
+        {selectMode ? (
+          <>
+            <Text style={styles.headerCount}>{selectedIds.size} selected</Text>
+            <TouchableOpacity onPress={exitSelectMode} style={styles.headerBtn}>
+              <Text style={styles.cancelText}>Cancel</Text>
             </TouchableOpacity>
-          </View>
+          </>
+        ) : (
+          <>
+            <Text style={styles.headerCount}>{headerCount}</Text>
+            <View style={styles.headerActions}>
+              {/* Back to Player */}
+              <TouchableOpacity
+                onPress={() => router.navigate("/(tabs)/")}
+                style={styles.iconCircle}
+                hitSlop={8}
+              >
+                <Music2
+                  size={isCompact ? 15 : 16}
+                  color={currentSong ? Colors.dark.accent : Colors.dark.textSecondary}
+                />
+              </TouchableOpacity>
+              <TouchableOpacity onPress={openSearch} style={styles.iconCircle} hitSlop={8}>
+                <Search size={isCompact ? 15 : 16} color={Colors.dark.textSecondary} />
+              </TouchableOpacity>
+              <TouchableOpacity onPress={() => setShowQueue(true)} style={styles.iconCircle} hitSlop={8}>
+                <ListMusic size={isCompact ? 15 : 16} color={Colors.dark.textSecondary} />
+              </TouchableOpacity>
+            </View>
+          </>
         )}
       </View>
 
-      {/* ── Song list ── */}
+      {/* ── Filter pills ── */}
+      {!selectMode && (
+        <View style={[styles.filterBar, isCompact && styles.filterBarCompact]}>
+          {(["songs", "artists", "recent"] as FilterMode[]).map((mode) => {
+            const active = filterMode === mode;
+            return (
+              <TouchableOpacity
+                key={mode}
+                style={[styles.filterPill, active && styles.filterPillActive]}
+                onPress={() => {
+                  Haptics.selectionAsync();
+                  setFilterMode(mode);
+                  setSearchText("");
+                  setSearchActive(false);
+                }}
+                activeOpacity={0.75}
+              >
+                {mode === "songs"   && <Music2 size={12} color={active ? "#fff" : Colors.dark.textTertiary} />}
+                {mode === "artists" && <Users  size={12} color={active ? "#fff" : Colors.dark.textTertiary} />}
+                {mode === "recent"  && <Clock  size={12} color={active ? "#fff" : Colors.dark.textTertiary} />}
+                <Text style={[styles.filterText, active && styles.filterTextActive]}>
+                  {mode === "songs" ? "Songs" : mode === "artists" ? "Artists" : "Recent"}
+                </Text>
+              </TouchableOpacity>
+            );
+          })}
+        </View>
+      )}
+
+      {/* ── Search bar ── */}
+      {searchActive && !selectMode && (
+        <View style={[styles.searchRow, isCompact && styles.searchRowCompact]}>
+          <Search size={14} color={Colors.dark.textTertiary} />
+          <TextInput
+            ref={searchRef}
+            style={[styles.searchInput, isCompact && styles.searchInputCompact]}
+            placeholder={filterMode === "artists" ? "Search artist or title…" : "Title or artist…"}
+            placeholderTextColor={Colors.dark.textTertiary}
+            value={searchText}
+            onChangeText={setSearchText}
+            autoCorrect={false}
+            returnKeyType="search"
+          />
+          <TouchableOpacity onPress={closeSearch} hitSlop={10}>
+            <X size={16} color={Colors.dark.textTertiary} />
+          </TouchableOpacity>
+        </View>
+      )}
+
+      {/* ── Content ── */}
       {!isSetupDone || songs.length === 0 ? (
         <View style={styles.empty}>
           <View style={styles.emptyIcon}>
@@ -362,7 +388,15 @@ export default function LibraryScreen() {
           <Text style={styles.emptyText}>No songs loaded</Text>
           <Text style={styles.emptyHint}>Scan your device from the Player tab</Text>
         </View>
-      ) : displayedSongs.length === 0 ? (
+      ) : filterMode === "recent" && recentlyPlayed.length === 0 ? (
+        <View style={styles.empty}>
+          <View style={styles.emptyIcon}>
+            <Clock size={32} color={Colors.dark.accent} />
+          </View>
+          <Text style={styles.emptyText}>No recent plays</Text>
+          <Text style={styles.emptyHint}>Songs appear here after you play them</Text>
+        </View>
+      ) : listRows.length === 0 ? (
         <View style={styles.empty}>
           <Search size={32} color={Colors.dark.textTertiary} />
           <Text style={styles.emptyText}>No results</Text>
@@ -371,19 +405,13 @@ export default function LibraryScreen() {
       ) : (
         <FlatList
           ref={listRef}
-          data={displayedSongs}
-          keyExtractor={(item) => item.id}
-          renderItem={renderItem}
-          contentContainerStyle={{
-            paddingBottom: listBottomPad,
-            paddingRight: listPaddingRight,
-          }}
+          data={listRows}
+          keyExtractor={(item) => item.key}
+          renderItem={renderRow}
+          contentContainerStyle={{ paddingBottom: listBottomPad }}
           showsVerticalScrollIndicator={false}
-          getItemLayout={(_, index) => ({
-            length: itemH,
-            offset: itemH * index,
-            index,
-          })}
+          getItemLayout={getItemLayout}
+          stickyHeaderIndices={stickyHeaderIndices}
           onLayout={() => {
             isListReady.current = true;
             scrollToCurrent();
@@ -400,69 +428,6 @@ export default function LibraryScreen() {
         />
       )}
 
-      {/* ── Vertical alpha index strip ── */}
-      {showAlphaBar && (
-        <View
-          style={[
-            styles.alphaStrip,
-            {
-              top:    aboveListH,
-              bottom: stripBottom,
-              width:  STRIP_W,
-            },
-          ]}
-          onLayout={(e) => { stripHeightRef.current = e.nativeEvent.layout.height; }}
-          {...stripPanResponder.panHandlers}
-        >
-          {LETTERS.map((letter) => {
-            const available = availableLetters.has(letter);
-            const isActive  = activeLetter === letter;
-
-            return (
-              <View key={letter} style={styles.letterSlot}>
-                {isActive ? (
-                  // Active: filled accent pill showing the letter clearly
-                  <View style={styles.activeLetterPill}>
-                    <Text style={[styles.activeLetterText, { fontSize: letterFontSz + 1 }]}>
-                      {letter}
-                    </Text>
-                  </View>
-                ) : (
-                  <Text
-                    style={[
-                      styles.letterText,
-                      { fontSize: letterFontSz },
-                      available ? styles.letterAvailable : styles.letterUnavailable,
-                    ]}
-                  >
-                    {letter}
-                  </Text>
-                )}
-              </View>
-            );
-          })}
-        </View>
-      )}
-
-      {/* ── Floating bubble — appears beside strip while dragging ── */}
-      {activeLetter !== null && (
-        <View
-          style={[
-            styles.bubble,
-            {
-              // Position bubble in screen coordinates:
-              // topInset + aboveListH puts us at the strip's top edge,
-              // then bubbleY is the offset within the strip.
-              top:   topInset + aboveListH + bubbleY,
-              right: STRIP_W + 16,
-            },
-          ]}
-          pointerEvents="none"
-        >
-          <Text style={styles.bubbleText}>{activeLetter}</Text>
-        </View>
-      )}
-
       {/* ── Select mode action bar ── */}
       {selectMode && (
         <View
@@ -472,10 +437,7 @@ export default function LibraryScreen() {
           ]}
         >
           <TouchableOpacity
-            style={[
-              styles.removeBtn,
-              selectedIds.size === 0 && styles.removeBtnDisabled,
-            ]}
+            style={[styles.removeBtn, selectedIds.size === 0 && styles.removeBtnDisabled]}
             onPress={handleRemove}
             disabled={selectedIds.size === 0}
             activeOpacity={0.75}
@@ -501,11 +463,11 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
-    paddingHorizontal: 24,
+    paddingHorizontal: 20,
     paddingTop: 10,
-    paddingBottom: 10,
+    paddingBottom: 6,
   },
-  headerCompact: { paddingTop: 6, paddingBottom: 6 },
+  headerCompact: { paddingTop: 6, paddingBottom: 4 },
   headerCount: {
     color: Colors.dark.textTertiary,
     fontSize: 12,
@@ -513,7 +475,7 @@ const styles = StyleSheet.create({
     letterSpacing: 0.5,
     textTransform: "uppercase",
   },
-  headerActions: { flexDirection: "row", alignItems: "center", gap: 8 },
+  headerActions: { flexDirection: "row", alignItems: "center", gap: 6 },
   headerBtn: { padding: 6 },
   cancelText: {
     color: Colors.dark.textSecondary,
@@ -528,6 +490,36 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
   },
+
+  // ── Filter pills ──────────────────────────────────────────────────────
+  filterBar: {
+    flexDirection: "row",
+    paddingHorizontal: 20,
+    paddingBottom: 10,
+    gap: 8,
+  },
+  filterBarCompact: { paddingBottom: 6 },
+  filterPill: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 5,
+    paddingVertical: 7,
+    paddingHorizontal: 14,
+    borderRadius: 20,
+    backgroundColor: Colors.dark.surface,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: Colors.dark.border,
+  },
+  filterPillActive: {
+    backgroundColor: Colors.dark.accent,
+    borderColor: Colors.dark.accent,
+  },
+  filterText: {
+    color: Colors.dark.textTertiary,
+    fontSize: 13,
+    fontFamily: "Inter_500Medium",
+  },
+  filterTextActive: { color: "#fff" },
 
   // ── Search bar ────────────────────────────────────────────────────────
   searchRow: {
@@ -553,11 +545,29 @@ const styles = StyleSheet.create({
   },
   searchInputCompact: { fontSize: 13 },
 
+  // ── Artist section headers (sticky in Artists mode) ───────────────────
+  sectionHeader: {
+    justifyContent: "flex-end",
+    paddingHorizontal: 20,
+    paddingBottom: 6,
+    backgroundColor: Colors.dark.background,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: Colors.dark.border,
+  },
+  sectionText: {
+    color: Colors.dark.accent,
+    fontSize: 12,
+    fontFamily: "Inter_700Bold",
+    letterSpacing: 0.8,
+    textTransform: "uppercase",
+  },
+  sectionTextCompact: { fontSize: 11 },
+
   // ── Song rows ─────────────────────────────────────────────────────────
   row: {
     flexDirection: "row",
     alignItems: "center",
-    paddingHorizontal: 24,
+    paddingHorizontal: 20,
     gap: 14,
     borderBottomWidth: StyleSheet.hairlineWidth,
     borderBottomColor: Colors.dark.border,
@@ -654,88 +664,5 @@ const styles = StyleSheet.create({
     color: "#fff",
     fontSize: 15,
     fontFamily: "Inter_600SemiBold",
-  },
-
-  // ── Vertical alpha strip ──────────────────────────────────────────────
-  //
-  // Sits absolutely on the right edge, from below the header to above the
-  // tab bar. Has a semi-transparent pill background so users notice it.
-  //
-  alphaStrip: {
-    position: "absolute",
-    right: 0,
-    // Subtle floating pill background
-    backgroundColor: "rgba(28,28,46,0.88)",
-    borderTopLeftRadius: 12,
-    borderBottomLeftRadius: 12,
-    borderLeftWidth: StyleSheet.hairlineWidth,
-    borderLeftColor: Colors.dark.border,
-    alignItems: "center",
-    justifyContent: "space-between",
-    paddingVertical: 6,
-    // Shadow on left edge so it floats over the list
-    shadowColor: "#000",
-    shadowOffset: { width: -2, height: 0 },
-    shadowOpacity: 0.35,
-    shadowRadius: 6,
-    elevation: 6,
-    zIndex: 20,
-  },
-  letterSlot: {
-    flex: 1,
-    width: STRIP_W,
-    alignItems: "center",
-    justifyContent: "center",
-    minHeight: 9,
-  },
-  letterText: {
-    fontFamily: "Inter_600SemiBold",
-    lineHeight: 13,
-    textAlign: "center",
-  },
-  letterAvailable:   { color: "rgba(255,255,255,0.70)" },
-  letterUnavailable: { color: "rgba(255,255,255,0.18)" },
-
-  // Active letter — shown as a small filled accent-purple circle
-  activeLetterPill: {
-    width: 22,
-    height: 22,
-    borderRadius: 11,
-    backgroundColor: Colors.dark.accent,
-    alignItems: "center",
-    justifyContent: "center",
-    shadowColor: Colors.dark.accent,
-    shadowOffset: { width: 0, height: 0 },
-    shadowOpacity: 0.5,
-    shadowRadius: 4,
-    elevation: 3,
-  },
-  activeLetterText: {
-    color: "#fff",
-    fontFamily: "Inter_700Bold",
-    lineHeight: 14,
-    textAlign: "center",
-  },
-
-  // ── Floating letter bubble ────────────────────────────────────────────
-  bubble: {
-    position: "absolute",
-    width: BUBBLE_SZ,
-    height: BUBBLE_SZ,
-    borderRadius: BUBBLE_SZ / 2,
-    backgroundColor: Colors.dark.accent,
-    alignItems: "center",
-    justifyContent: "center",
-    zIndex: 30,
-    shadowColor: Colors.dark.accent,
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.5,
-    shadowRadius: 10,
-    elevation: 12,
-  },
-  bubbleText: {
-    color: "#fff",
-    fontSize: 24,
-    fontFamily: "Inter_700Bold",
   },
 });
