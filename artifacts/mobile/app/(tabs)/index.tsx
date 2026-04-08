@@ -2,7 +2,6 @@ import * as Haptics from "expo-haptics";
 import {
   ChevronDown,
   ImageIcon,
-  Library,
   Pause,
   Play,
   ScanSearch,
@@ -212,17 +211,6 @@ export default function PlayerScreen() {
           </Text>
         </View>
 
-        {/* Primary: Browse Library */}
-        <View style={[styles.emptyActions, { paddingBottom: playerBottomPad + 16 }]}>
-          <TouchableOpacity
-            style={styles.browseBtn}
-            onPress={() => router.navigate("/(tabs)/library")}
-            activeOpacity={0.82}
-          >
-            <Library size={18} color="#fff" />
-            <Text style={styles.browseBtnText}>Browse Library</Text>
-          </TouchableOpacity>
-        </View>
       </View>
     );
   }
@@ -536,30 +524,4 @@ const styles = StyleSheet.create({
     lineHeight: 20,
   },
 
-  emptyActions: {
-    alignItems: "center",
-    paddingHorizontal: 40,
-    gap: 16,
-  },
-  browseBtn: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "center",
-    gap: 10,
-    backgroundColor: Colors.dark.accent,
-    paddingVertical: 16,
-    paddingHorizontal: 36,
-    borderRadius: 50,
-    width: "100%",
-    shadowColor: Colors.dark.accent,
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.35,
-    shadowRadius: 10,
-    elevation: 6,
-  },
-  browseBtnText: {
-    color: "#fff",
-    fontSize: 16,
-    fontFamily: "Inter_600SemiBold",
-  },
 });
