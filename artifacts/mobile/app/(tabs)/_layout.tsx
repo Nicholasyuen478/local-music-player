@@ -49,8 +49,9 @@ export default function TabLayout() {
       <Tabs.Screen
         name="index"
         options={{
-          tabBarButton: () => null,           // hide this tab's button from the bar
-          tabBarStyle: { display: "none" },   // hide the entire bar while on player
+          tabBarButton: () => null,
+          tabBarItemStyle: { display: "none", width: 0, overflow: "hidden" },
+          tabBarStyle: { display: "none" },
         }}
       />
 

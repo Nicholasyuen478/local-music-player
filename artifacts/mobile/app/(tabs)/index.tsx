@@ -174,9 +174,8 @@ export default function PlayerScreen() {
     return (
       <View style={[styles.container, { paddingTop: topInset }]}>
 
-        {/* Top bar — scan button only in empty state */}
+        {/* Top bar — scan button on the left in empty state */}
         <View style={[styles.topBar, isCompact && styles.topBarCompact]}>
-          <View style={styles.utilBtn} />
           <TouchableOpacity
             onPress={handleScan}
             style={styles.utilBtn}

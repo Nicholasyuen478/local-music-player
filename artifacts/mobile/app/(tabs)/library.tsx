@@ -110,15 +110,6 @@ export default function LibraryScreen() {
     return [];
   }, [filterMode, displayedSongs, songs, recentlyPlayed, searchText]);
 
-  // Indices of section-header rows for sticky behaviour in Artists mode
-  const stickyHeaderIndices = useMemo(() => {
-    if (filterMode !== "artists") return [];
-    return listRows.reduce<number[]>((acc, row, idx) => {
-      if (row.kind === "section") acc.push(idx);
-      return acc;
-    }, []);
-  }, [listRows, filterMode]);
-
   // ── Header count string ─────────────────────────────────────────────────
   const headerCount = useMemo(() => {
     if (filterMode === "songs") {
@@ -411,7 +402,6 @@ export default function LibraryScreen() {
           contentContainerStyle={{ paddingBottom: listBottomPad }}
           showsVerticalScrollIndicator={false}
           getItemLayout={getItemLayout}
-          stickyHeaderIndices={stickyHeaderIndices}
           onLayout={() => {
             isListReady.current = true;
             scrollToCurrent();
