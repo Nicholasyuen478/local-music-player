@@ -11,7 +11,7 @@ import {
   Trash2,
 } from "lucide-react-native";
 import { router } from "expo-router";
-import React, { useState, useCallback, useRef } from "react";
+import React, { useState, useCallback, useRef, useEffect } from "react";
 import {
   Alert,
   Animated,
@@ -63,6 +63,31 @@ export default function PlayerScreen() {
 
   // Bottom padding: just safe-area + breathing room, no tab bar
   const playerBottomPad = bottomInset + (isCompact ? 14 : 24);
+
+  // ── Setup-page pulse rings ─────────────────────────────────────────────
+  const ring1 = useRef(new Animated.Value(0)).current;
+  const ring2 = useRef(new Animated.Value(0)).current;
+  const ring3 = useRef(new Animated.Value(0)).current;
+
+  useEffect(() => {
+    const DURATION = 2600;
+    const STEP = DURATION / 3;
+
+    const makeLoop = (anim: Animated.Value, delay: number) =>
+      Animated.loop(
+        Animated.sequence([
+          Animated.delay(delay),
+          Animated.timing(anim, { toValue: 1, duration: DURATION, useNativeDriver: true }),
+          Animated.timing(anim, { toValue: 0, duration: 0, useNativeDriver: true }),
+        ]),
+      );
+
+    const l1 = makeLoop(ring1, 0);
+    const l2 = makeLoop(ring2, STEP);
+    const l3 = makeLoop(ring3, STEP * 2);
+    l1.start(); l2.start(); l3.start();
+    return () => { l1.stop(); l2.stop(); l3.stop(); };
+  }, [ring1, ring2, ring3]);
 
   // ── Swipe animation ────────────────────────────────────────────────────
   const slideX       = useRef(new Animated.Value(0)).current;
@@ -169,47 +194,50 @@ export default function PlayerScreen() {
   const isEmpty = !isSetupDone || songs.length === 0;
 
   if (isEmpty) {
-    const emptyArtSize = Math.min(width - 80, 240);
-    return (
-      <View style={[styles.container, { paddingTop: topInset }]}>
+    const orbSize = Math.min(width * 0.55, 220);
 
-        {/* Top bar — scan button on the left in empty state */}
-        <View style={[styles.topBar, isCompact && styles.topBarCompact]}>
-          <TouchableOpacity
-            onPress={handleScan}
-            style={styles.utilBtn}
-            activeOpacity={0.6}
-            disabled={isScanning || isLoading}
-            hitSlop={8}
-          >
-            <ScanSearch
-              size={17}
-              color={(isScanning || isLoading) ? Colors.dark.accent : Colors.dark.textTertiary}
-            />
-          </TouchableOpacity>
+    const makeRingStyle = (anim: Animated.Value) => ({
+      opacity: anim.interpolate({ inputRange: [0, 0.4, 1], outputRange: [0, 0.45, 0] }),
+      transform: [{
+        scale: anim.interpolate({ inputRange: [0, 1], outputRange: [0.55, 1.7] }),
+      }],
+    });
+
+    return (
+      <View style={[styles.setupContainer, { paddingTop: topInset, paddingBottom: playerBottomPad + 24 }]}>
+
+        {/* Bold title — top aligned like the reference */}
+        <View style={styles.setupHeader}>
+          <Text style={[styles.setupTitle, isCompact && styles.setupTitleCompact]}>
+            Scan your{"\n"}music
+          </Text>
+          <Text style={styles.setupSubtitle}>Tap to start</Text>
         </View>
 
-        {/* Empty art placeholder */}
-        <View style={styles.emptyArtWrap}>
-          <View style={[styles.emptyArtShadow, {
-            width: emptyArtSize,
-            height: emptyArtSize,
-            borderRadius: 24,
-            shadowRadius: 30,
-          }]}>
-            <SongArtwork artworkUri={null} size={emptyArtSize} borderRadius={24} />
+        {/* Pulsing orb */}
+        <View style={[styles.setupOrb, { width: orbSize, height: orbSize }]}>
+          {/* Pulse rings */}
+          <Animated.View style={[styles.ring, { width: orbSize, height: orbSize, borderRadius: orbSize / 2 }, makeRingStyle(ring1)]} />
+          <Animated.View style={[styles.ring, { width: orbSize, height: orbSize, borderRadius: orbSize / 2 }, makeRingStyle(ring2)]} />
+          <Animated.View style={[styles.ring, { width: orbSize, height: orbSize, borderRadius: orbSize / 2 }, makeRingStyle(ring3)]} />
+          {/* Core glow */}
+          <View style={[styles.orbCore, { width: orbSize * 0.52, height: orbSize * 0.52, borderRadius: orbSize * 0.26 }]}>
+            <View style={[styles.orbInner, { width: orbSize * 0.32, height: orbSize * 0.32, borderRadius: orbSize * 0.16 }]} />
           </View>
         </View>
 
-        {/* CTA copy */}
-        <View style={styles.emptyCopy}>
-          <Text style={[styles.emptyTitle, isCompact && styles.emptyTitleCompact]}>
-            No Song Selected
+        {/* Single scan button */}
+        <TouchableOpacity
+          style={[styles.setupBtn, (isScanning || isLoading) && styles.setupBtnScanning]}
+          onPress={handleScan}
+          disabled={isScanning || isLoading}
+          activeOpacity={0.82}
+        >
+          <ScanSearch size={18} color={(isScanning || isLoading) ? Colors.dark.accent : "#fff"} />
+          <Text style={[styles.setupBtnText, (isScanning || isLoading) && styles.setupBtnTextScanning]}>
+            {isScanning || isLoading ? "Scanning…" : "Scan songs from device"}
           </Text>
-          <Text style={styles.emptySubtitle}>
-            Add your music library to get started
-          </Text>
-        </View>
+        </TouchableOpacity>
 
       </View>
     );
@@ -488,40 +516,82 @@ const styles = StyleSheet.create({
     elevation: 6,
   },
 
-  // ══ Empty state ══════════════════════════════════════════════════════
-  emptyArtWrap: {
+  // ══ Setup / empty state ═══════════════════════════════════════════════
+  setupContainer: {
     flex: 1,
-    alignItems: "center",
-    justifyContent: "center",
-    paddingHorizontal: 40,
-  },
-  emptyArtShadow: {
-    shadowColor: Colors.dark.accent,
-    shadowOffset: { width: 0, height: 12 },
-    shadowOpacity: 0.20,
-    elevation: 10,
+    backgroundColor: Colors.dark.background,
+    justifyContent: "space-between",
   },
 
-  emptyCopy: {
-    alignItems: "center",
-    paddingHorizontal: 40,
-    marginBottom: 32,
+  setupHeader: {
+    paddingHorizontal: 28,
+    paddingTop: 12,
     gap: 8,
   },
-  emptyTitle: {
+  setupTitle: {
     color: Colors.dark.text,
-    fontSize: 22,
+    fontSize: 36,
     fontFamily: "Inter_700Bold",
-    letterSpacing: -0.3,
-    textAlign: "center",
+    letterSpacing: -1,
+    lineHeight: 42,
   },
-  emptyTitleCompact: { fontSize: 19 },
-  emptySubtitle: {
+  setupTitleCompact: { fontSize: 28, lineHeight: 34 },
+  setupSubtitle: {
     color: Colors.dark.textTertiary,
     fontSize: 14,
     fontFamily: "Inter_400Regular",
-    textAlign: "center",
-    lineHeight: 20,
+    letterSpacing: 0.1,
+  },
+
+  setupOrb: {
+    alignSelf: "center",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  ring: {
+    position: "absolute",
+    borderWidth: 1.5,
+    borderColor: Colors.dark.accent,
+  },
+  orbCore: {
+    backgroundColor: "rgba(108,99,255,0.18)",
+    alignItems: "center",
+    justifyContent: "center",
+    borderWidth: 1,
+    borderColor: "rgba(108,99,255,0.35)",
+  },
+  orbInner: {
+    backgroundColor: Colors.dark.accent,
+    opacity: 0.55,
+  },
+
+  setupBtn: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 10,
+    marginHorizontal: 28,
+    paddingVertical: 18,
+    borderRadius: 50,
+    backgroundColor: Colors.dark.accent,
+    shadowColor: Colors.dark.accent,
+    shadowOffset: { width: 0, height: 6 },
+    shadowOpacity: 0.35,
+    shadowRadius: 14,
+    elevation: 8,
+  },
+  setupBtnScanning: {
+    backgroundColor: Colors.dark.surface,
+    shadowOpacity: 0,
+    elevation: 0,
+  },
+  setupBtnText: {
+    color: "#fff",
+    fontSize: 15,
+    fontFamily: "Inter_600SemiBold",
+  },
+  setupBtnTextScanning: {
+    color: Colors.dark.accent,
   },
 
 });
