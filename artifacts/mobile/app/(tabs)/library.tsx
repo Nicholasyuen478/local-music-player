@@ -1,5 +1,5 @@
 import * as Haptics from "expo-haptics";
-import { Check, Clock, ListMusic, Music2, Search, Users, X } from "lucide-react-native";
+import { Check, ChevronRight, Clock, ListMusic, Music2, Search, Users, X } from "lucide-react-native";
 import { router, useFocusEffect } from "expo-router";
 import React, {
   useCallback,
@@ -41,19 +41,19 @@ export default function LibraryScreen() {
     removeSongs,
   } = useMusicContext();
 
-  const [filterMode,   setFilterMode]   = useState<FilterMode>("songs");
-  const [selectedIds,  setSelectedIds]  = useState<Set<string>>(new Set());
-  const [selectMode,   setSelectMode]   = useState(false);
-  const [searchText,   setSearchText]   = useState("");
-  const [searchActive, setSearchActive] = useState(false);
-  const [showQueue,    setShowQueue]    = useState(false);
+  const [filterMode,      setFilterMode]      = useState<FilterMode>("songs");
+  const [selectedIds,     setSelectedIds]     = useState<Set<string>>(new Set());
+  const [selectMode,      setSelectMode]      = useState(false);
+  const [searchText,      setSearchText]      = useState("");
+  const [searchActive,    setSearchActive]    = useState(false);
+  const [showQueue,       setShowQueue]       = useState(false);
+  const [expandedArtists, setExpandedArtists] = useState<Set<string>>(new Set());
 
   const listRef     = useRef<FlatList>(null);
   const isListReady = useRef(false);
   const searchRef   = useRef<TextInput>(null);
 
-  const itemH       = isCompact ? 56 : 64;
-  const sectionH    = isCompact ? 34 : 40;  // artist section header height
+  const itemH = isCompact ? 56 : 64;
 
   // ── Filtered songs (search applied) ────────────────────────────────────
   const displayedSongs = useMemo(() => {
@@ -66,6 +66,25 @@ export default function LibraryScreen() {
     );
   }, [songs, searchText]);
 
+  // ── Artist → songs map (search-filtered, used in Artists mode) ─────────
+  const artistSongsMap = useMemo<Map<string, Song[]>>(() => {
+    if (filterMode !== "artists") return new Map();
+    const q = searchText.trim().toLowerCase();
+    const source = q
+      ? songs.filter((s) => s.artist.toLowerCase().includes(q) || s.title.toLowerCase().includes(q))
+      : songs;
+    const sorted = [...source].sort((a, b) => {
+      const c = a.artist.localeCompare(b.artist, undefined, { sensitivity: "base" });
+      return c !== 0 ? c : a.title.localeCompare(b.title, undefined, { sensitivity: "base" });
+    });
+    const map = new Map<string, Song[]>();
+    for (const song of sorted) {
+      if (!map.has(song.artist)) map.set(song.artist, []);
+      map.get(song.artist)!.push(song);
+    }
+    return map;
+  }, [filterMode, songs, searchText]);
+
   // ── List rows based on current filter mode ──────────────────────────────
   const listRows = useMemo<ListRow[]>(() => {
     if (filterMode === "songs") {
@@ -73,24 +92,14 @@ export default function LibraryScreen() {
     }
 
     if (filterMode === "artists") {
-      const q = searchText.trim().toLowerCase();
-      // In Artists mode search filters by artist name
-      const source = q
-        ? songs.filter((s) => s.artist.toLowerCase().includes(q) || s.title.toLowerCase().includes(q))
-        : songs;
-      // Sort: artist A-Z, then title A-Z within same artist
-      const sorted = [...source].sort((a, b) => {
-        const c = a.artist.localeCompare(b.artist, undefined, { sensitivity: "base" });
-        return c !== 0 ? c : a.title.localeCompare(b.title, undefined, { sensitivity: "base" });
-      });
       const rows: ListRow[] = [];
-      let lastArtist = "";
-      for (const song of sorted) {
-        if (song.artist !== lastArtist) {
-          rows.push({ kind: "section", artist: song.artist, key: `hdr-${song.artist}` });
-          lastArtist = song.artist;
+      for (const [artist, artistSongs] of artistSongsMap) {
+        rows.push({ kind: "section", artist, key: `hdr-${artist}` });
+        if (expandedArtists.has(artist)) {
+          for (const song of artistSongs) {
+            rows.push({ kind: "song", data: song, key: song.id });
+          }
         }
-        rows.push({ kind: "song", data: song, key: song.id });
       }
       return rows;
     }
@@ -108,7 +117,7 @@ export default function LibraryScreen() {
     }
 
     return [];
-  }, [filterMode, displayedSongs, songs, recentlyPlayed, searchText]);
+  }, [filterMode, displayedSongs, artistSongsMap, expandedArtists, recentlyPlayed, searchText]);
 
   // ── Header count string ─────────────────────────────────────────────────
   const headerCount = useMemo(() => {
@@ -121,15 +130,14 @@ export default function LibraryScreen() {
         : "";
     }
     if (filterMode === "artists") {
-      const artistSet = new Set(listRows.flatMap((r) => (r.kind === "song" ? [r.data.artist] : [])));
-      const n = artistSet.size;
+      const n = artistSongsMap.size;
       return n > 0 ? `${n} artist${n !== 1 ? "s" : ""}` : "";
     }
     if (filterMode === "recent") {
       return recentlyPlayed.length > 0 ? `${recentlyPlayed.length} recent` : "";
     }
     return "";
-  }, [filterMode, displayedSongs, songs, recentlyPlayed, listRows, searchActive]);
+  }, [filterMode, displayedSongs, songs, recentlyPlayed, artistSongsMap, searchActive]);
 
   // ── Select mode ─────────────────────────────────────────────────────────
   const exitSelectMode = useCallback(() => {
@@ -174,6 +182,34 @@ export default function LibraryScreen() {
       },
     ]);
   }, [selectedIds, removeSongs, exitSelectMode]);
+
+  // ── Artist group expand / select-all ────────────────────────────────────
+  const toggleArtist = useCallback((artist: string) => {
+    Haptics.selectionAsync();
+    setExpandedArtists((prev) => {
+      const next = new Set(prev);
+      if (next.has(artist)) next.delete(artist);
+      else next.add(artist);
+      return next;
+    });
+  }, []);
+
+  const handleArtistGroupLongPress = useCallback(
+    (artist: string) => {
+      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+      const artistSongs = artistSongsMap.get(artist) ?? [];
+      if (artistSongs.length === 0) return;
+      // Expand so the user can see the highlighted songs
+      setExpandedArtists((prev) => {
+        const next = new Set(prev);
+        next.add(artist);
+        return next;
+      });
+      setSelectMode(true);
+      setSelectedIds(new Set(artistSongs.map((s) => s.id)));
+    },
+    [artistSongsMap],
+  );
 
   // ── Search ──────────────────────────────────────────────────────────────
   const openSearch = useCallback(() => {
@@ -258,17 +294,41 @@ export default function LibraryScreen() {
   const renderRow = useCallback(
     ({ item }: { item: ListRow }) => {
       if (item.kind === "section") {
+        const isExpanded  = expandedArtists.has(item.artist);
+        const groupSongs  = artistSongsMap.get(item.artist) ?? [];
+        const count       = groupSongs.length;
+        const allSelected = selectMode && count > 0 && groupSongs.every((s) => selectedIds.has(s.id));
+
         return (
-          <View style={[styles.sectionHeader, { height: sectionH }]}>
-            <Text style={[styles.sectionText, isCompact && styles.sectionTextCompact]} numberOfLines={1}>
-              {item.artist}
-            </Text>
-          </View>
+          <TouchableOpacity
+            style={[
+              styles.sectionHeader,
+              allSelected && styles.sectionHeaderSelected,
+            ]}
+            onPress={() => toggleArtist(item.artist)}
+            onLongPress={() => handleArtistGroupLongPress(item.artist)}
+            delayLongPress={350}
+            activeOpacity={0.7}
+          >
+            <View style={styles.sectionContent}>
+              <Text style={[styles.sectionText, isCompact && styles.sectionTextCompact]} numberOfLines={1}>
+                {item.artist}
+              </Text>
+              <Text style={styles.sectionCount}>{count}</Text>
+            </View>
+            <View style={{ transform: [{ rotate: isExpanded ? "90deg" : "0deg" }] }}>
+              <ChevronRight size={15} color={Colors.dark.accent} />
+            </View>
+          </TouchableOpacity>
         );
       }
       return renderSongRow(item.data, item.key);
     },
-    [renderSongRow, sectionH, isCompact],
+    [
+      renderSongRow, isCompact,
+      expandedArtists, artistSongsMap, selectMode, selectedIds,
+      toggleArtist, handleArtistGroupLongPress,
+    ],
   );
 
   // getItemLayout only for uniform-height modes
@@ -335,6 +395,7 @@ export default function LibraryScreen() {
                   setFilterMode(mode);
                   setSearchText("");
                   setSearchActive(false);
+                  setExpandedArtists(new Set());
                 }}
                 activeOpacity={0.75}
               >
@@ -535,14 +596,26 @@ const styles = StyleSheet.create({
   },
   searchInputCompact: { fontSize: 13 },
 
-  // ── Artist section headers (sticky in Artists mode) ───────────────────
+  // ── Artist section headers (collapsible groups) ────────────────────────
   sectionHeader: {
-    justifyContent: "flex-end",
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
     paddingHorizontal: 20,
-    paddingBottom: 6,
+    paddingVertical: 8,
     backgroundColor: Colors.dark.background,
     borderBottomWidth: StyleSheet.hairlineWidth,
     borderBottomColor: Colors.dark.border,
+  },
+  sectionHeaderSelected: {
+    backgroundColor: "rgba(108,99,255,0.10)",
+  },
+  sectionContent: {
+    flex: 1,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+    marginRight: 8,
   },
   sectionText: {
     color: Colors.dark.accent,
@@ -550,8 +623,14 @@ const styles = StyleSheet.create({
     fontFamily: "Inter_700Bold",
     letterSpacing: 0.8,
     textTransform: "uppercase",
+    flexShrink: 1,
   },
   sectionTextCompact: { fontSize: 11 },
+  sectionCount: {
+    color: Colors.dark.textTertiary,
+    fontSize: 11,
+    fontFamily: "Inter_400Regular",
+  },
 
   // ── Song rows ─────────────────────────────────────────────────────────
   row: {
