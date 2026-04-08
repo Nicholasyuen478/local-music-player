@@ -1,5 +1,11 @@
 import * as Haptics from "expo-haptics";
-import { Check, Music2, Search, X } from "lucide-react-native";
+import {
+  Check,
+  ListMusic,
+  Music2,
+  Search,
+  X,
+} from "lucide-react-native";
 import React, {
   useCallback,
   useMemo,
@@ -21,8 +27,9 @@ import Colors from "@/constants/colors";
 import { useMusicContext } from "@/context/MusicContext";
 import type { Song } from "@/context/MusicContext";
 import { useLayout } from "@/hooks/useLayout";
+import QueuePanel from "@/components/QueuePanel";
 
-// ── Alpha index bar ───────────────────────────────────────────────────────────
+// ── Alphabet index bar ────────────────────────────────────────────────────────
 const LETTERS = [
   "#", "A", "B", "C", "D", "E", "F", "G", "H", "I", "J", "K", "L",
   "M", "N", "O", "P", "Q", "R", "S", "T", "U", "V", "W", "X", "Y", "Z",
@@ -38,12 +45,10 @@ function firstLetterKey(title: string): string {
 export default function LibraryScreen() {
   const { topInset, bottomInset, tabBarH, isCompact } = useLayout();
   const {
-    queue,
-    currentIndex,
+    songs,      // A-Z sorted master list — what the library displays
     currentSong,
     isSetupDone,
-    shuffleEnabled,
-    playSong,
+    playSongFromLibrary,
     removeSongs,
   } = useMusicContext();
 
@@ -51,6 +56,7 @@ export default function LibraryScreen() {
   const [selectMode, setSelectMode] = useState(false);
   const [searchText, setSearchText] = useState("");
   const [searchActive, setSearchActive] = useState(false);
+  const [showQueue, setShowQueue] = useState(false);
   const [activeLetter, setActiveLetter] = useState<string | null>(null);
   const [bubbleY, setBubbleY] = useState(0);
 
@@ -58,43 +64,43 @@ export default function LibraryScreen() {
   const isListReady = useRef(false);
   const searchRef = useRef<TextInput>(null);
 
-  // Alpha strip height from onLayout (no measure() call needed)
+  // Alpha strip height from onLayout — no measure() needed
   const stripHeightRef = useRef(0);
   const lastHapticLetter = useRef<string | null>(null);
 
   const itemHeight = isCompact ? 52 : 56;
 
   // ── Filtered list for search ──────────────────────────────────────────────
-  const displayedQueue = useMemo(() => {
+  // Library always shows songs sorted A-Z (songs is the master A-Z list).
+  const displayedSongs = useMemo(() => {
     const q = searchText.trim().toLowerCase();
-    if (!q) return queue;
-    return queue.filter(
+    if (!q) return songs;
+    return songs.filter(
       (s) =>
         s.title.toLowerCase().includes(q) ||
         s.artist.toLowerCase().includes(q),
     );
-  }, [queue, searchText]);
+  }, [songs, searchText]);
 
-  // Show alpha bar only when not shuffling, not searching, and list has items
-  const showAlphaBar =
-    !shuffleEnabled && !searchActive && displayedQueue.length > 0;
+  // Alpha bar is always visible when the library is shown without a search
+  // (songs are always A-Z so jumping by letter always makes sense)
+  const showAlphaBar = !searchActive && displayedSongs.length > 0;
 
   // ── Section map: first display-index per starting letter ─────────────────
   const sectionMap = useMemo(() => {
     const map = new Map<string, number>();
-    displayedQueue.forEach((song, idx) => {
+    displayedSongs.forEach((song, idx) => {
       const letter = firstLetterKey(song.title);
       if (!map.has(letter)) map.set(letter, idx);
     });
     return map;
-  }, [displayedQueue]);
+  }, [displayedSongs]);
 
   const availableLetters = useMemo(
     () => new Set(sectionMap.keys()),
     [sectionMap],
   );
 
-  // Keep a stable ref so PanResponder callbacks don't stale-close
   const sectionMapRef = useRef(sectionMap);
   sectionMapRef.current = sectionMap;
 
@@ -111,7 +117,7 @@ export default function LibraryScreen() {
   }, []);
 
   const handlePress = useCallback(
-    (item: Song, displayIndex: number) => {
+    (item: Song) => {
       if (selectMode) {
         setSelectedIds((prev) => {
           const next = new Set(prev);
@@ -121,12 +127,10 @@ export default function LibraryScreen() {
           return next;
         });
       } else {
-        // Play the song at its queue position (not display position)
-        const queueIdx = queue.findIndex((s) => s.id === item.id);
-        playSong(item, queue, queueIdx >= 0 ? queueIdx : displayIndex);
+        playSongFromLibrary(item);
       }
     },
-    [selectMode, playSong, queue],
+    [selectMode, playSongFromLibrary],
   );
 
   const handleRemove = useCallback(() => {
@@ -156,19 +160,18 @@ export default function LibraryScreen() {
     searchRef.current?.blur();
   }, []);
 
-  // ── Auto-scroll to current song ───────────────────────────────────────────
-  // Bail if the user is in select mode — they are actively tapping items
-  // and an unexpected jump is disorienting.
+  // ── Auto-scroll to current song in library (A-Z) ─────────────────────────
   const scrollToCurrent = useCallback(() => {
-    if (selectMode) return;
-    if (searchActive) return;
-    if (currentIndex > 0 && listRef.current && isListReady.current) {
+    if (selectMode || searchActive) return;
+    if (!listRef.current || !isListReady.current || !currentSong) return;
+    const idx = songs.findIndex((s) => s.id === currentSong.id);
+    if (idx > 0) {
       listRef.current.scrollToIndex({
-        index: Math.max(0, currentIndex - 2),
+        index: Math.max(0, idx - 2),
         animated: true,
       });
     }
-  }, [currentIndex, selectMode, searchActive]);
+  }, [songs, currentSong, selectMode, searchActive]);
 
   const handleListLayout = useCallback(() => {
     isListReady.current = true;
@@ -183,7 +186,6 @@ export default function LibraryScreen() {
   );
 
   // ── Alpha strip gesture ───────────────────────────────────────────────────
-  // Using locationY (relative to the strip view) avoids any measure() async issue.
   const handleStripTouch = useCallback(
     (locationY: number) => {
       if (stripHeightRef.current === 0) return;
@@ -234,7 +236,7 @@ export default function LibraryScreen() {
 
   // ── Song row ──────────────────────────────────────────────────────────────
   const renderItem = useCallback(
-    ({ item, index }: { item: Song; index: number }) => {
+    ({ item }: { item: Song }) => {
       const isActive = item.id === currentSong?.id;
       const isSelected = selectedIds.has(item.id);
 
@@ -246,7 +248,7 @@ export default function LibraryScreen() {
             isActive && !selectMode && styles.rowActive,
             isSelected && styles.rowSelected,
           ]}
-          onPress={() => handlePress(item, index)}
+          onPress={() => handlePress(item)}
           onLongPress={() => handleLongPress(item.id)}
           delayLongPress={350}
           activeOpacity={0.6}
@@ -302,15 +304,34 @@ export default function LibraryScreen() {
         ) : (
           <>
             <Text style={styles.headerCount}>
-              {queue.length > 0
-                ? searchActive && displayedQueue.length !== queue.length
-                  ? `${displayedQueue.length} of ${queue.length} songs`
-                  : `${queue.length} songs`
+              {songs.length > 0
+                ? searchActive && displayedSongs.length !== songs.length
+                  ? `${displayedSongs.length} of ${songs.length} songs`
+                  : `${songs.length} songs`
                 : ""}
             </Text>
-            <TouchableOpacity onPress={openSearch} style={styles.headerBtn} hitSlop={8}>
-              <Search size={isCompact ? 16 : 18} color={Colors.dark.textTertiary} />
-            </TouchableOpacity>
+            <View style={styles.headerActions}>
+              <TouchableOpacity
+                onPress={openSearch}
+                style={styles.headerBtn}
+                hitSlop={8}
+              >
+                <Search
+                  size={isCompact ? 16 : 18}
+                  color={Colors.dark.textTertiary}
+                />
+              </TouchableOpacity>
+              <TouchableOpacity
+                onPress={() => setShowQueue(true)}
+                style={styles.headerBtn}
+                hitSlop={8}
+              >
+                <ListMusic
+                  size={isCompact ? 16 : 18}
+                  color={Colors.dark.textTertiary}
+                />
+              </TouchableOpacity>
+            </View>
           </>
         )}
       </View>
@@ -318,11 +339,7 @@ export default function LibraryScreen() {
       {/* ── Search bar ── */}
       {searchActive && (
         <View style={[styles.searchRow, isCompact && styles.searchRowCompact]}>
-          <Search
-            size={14}
-            color={Colors.dark.textTertiary}
-            style={styles.searchIcon}
-          />
+          <Search size={14} color={Colors.dark.textTertiary} />
           <TextInput
             ref={searchRef}
             style={[styles.searchInput, isCompact && styles.searchInputCompact]}
@@ -339,12 +356,12 @@ export default function LibraryScreen() {
         </View>
       )}
 
-      {!isSetupDone || queue.length === 0 ? (
+      {!isSetupDone || songs.length === 0 ? (
         <View style={styles.empty}>
           <Music2 size={40} color={Colors.dark.textTertiary} />
           <Text style={styles.emptyText}>No songs loaded</Text>
         </View>
-      ) : displayedQueue.length === 0 ? (
+      ) : displayedSongs.length === 0 ? (
         <View style={styles.empty}>
           <Search size={36} color={Colors.dark.textTertiary} />
           <Text style={styles.emptyText}>No results for "{searchText}"</Text>
@@ -352,7 +369,7 @@ export default function LibraryScreen() {
       ) : (
         <FlatList
           ref={listRef}
-          data={displayedQueue}
+          data={displayedSongs}
           keyExtractor={(item) => item.id}
           renderItem={renderItem}
           contentContainerStyle={{
@@ -378,7 +395,7 @@ export default function LibraryScreen() {
         />
       )}
 
-      {/* ── Alphabet index strip ── */}
+      {/* ── Alphabet index strip (always shown when not searching) ── */}
       {showAlphaBar && (
         <View
           style={styles.alphaStrip}
@@ -399,9 +416,7 @@ export default function LibraryScreen() {
                     style={[
                       styles.alphaLetter,
                       { fontSize: letterSize },
-                      available
-                        ? styles.alphaAvailable
-                        : styles.alphaUnavailable,
+                      available ? styles.alphaAvailable : styles.alphaUnavailable,
                     ]}
                   >
                     {letter}
@@ -446,6 +461,12 @@ export default function LibraryScreen() {
           </TouchableOpacity>
         </View>
       )}
+
+      {/* ── Playback queue slide-up panel ── */}
+      <QueuePanel
+        visible={showQueue}
+        onClose={() => setShowQueue(false)}
+      />
     </View>
   );
 }
@@ -469,6 +490,11 @@ const styles = StyleSheet.create({
     letterSpacing: 0.5,
     textTransform: "uppercase",
   },
+  headerActions: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 4,
+  },
   headerBtn: { padding: 4 },
   cancelText: {
     color: Colors.dark.textSecondary,
@@ -489,7 +515,6 @@ const styles = StyleSheet.create({
     gap: 8,
   },
   searchRowCompact: { marginBottom: 6, paddingVertical: 6 },
-  searchIcon: { flexShrink: 0 },
   searchInput: {
     flex: 1,
     color: Colors.dark.text,
@@ -560,7 +585,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 32,
   },
 
-  // ── Action bar (select mode) ────────────────────────────────────────────
+  // ── Select mode action bar ──────────────────────────────────────────────
   actionBar: {
     position: "absolute",
     left: 0,

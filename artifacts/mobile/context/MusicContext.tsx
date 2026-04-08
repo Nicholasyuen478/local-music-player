@@ -399,6 +399,10 @@ const [MusicContextProvider, useMusicContext] = createContextHook(() => {
 
       if (cachedSongs) {
         const parsed: Song[] = JSON.parse(cachedSongs);
+        // Keep songs sorted A-Z — the library always browses alphabetically
+        parsed.sort((a, b) =>
+          a.title.localeCompare(b.title, undefined, { sensitivity: "base" }),
+        );
 
         // Always restore in original (unshuffled) order.
         // Try to resume from the same song — find it in the original order.
@@ -448,6 +452,10 @@ const [MusicContextProvider, useMusicContext] = createContextHook(() => {
         for (const s of found) {
           if (!merged.find((x) => x.uri === s.uri)) merged.push(s);
         }
+        // Keep master song list sorted A-Z
+        merged.sort((a, b) =>
+          a.title.localeCompare(b.title, undefined, { sensitivity: "base" }),
+        );
         AsyncStorage.setItem(STORAGE_KEYS.SONGS, JSON.stringify(merged));
         AsyncStorage.setItem(STORAGE_KEYS.QUEUE, JSON.stringify(merged));
         return merged;
@@ -557,6 +565,44 @@ const [MusicContextProvider, useMusicContext] = createContextHook(() => {
       }
     },
     [queue],
+  );
+
+  // ── Play a song chosen from the library (A-Z view) ───────────────────────
+  // Library always shows `songs` sorted A-Z. When the user taps a song there
+  // we build a new playback queue:
+  //   • Shuffle OFF → queue = songs A-Z, start at the tapped song's position
+  //   • Shuffle ON  → tapped song plays first, rest of songs shuffled after it
+  const playSongFromLibrary = useCallback(
+    async (song: Song) => {
+      try {
+        let newQueue: Song[];
+        let targetIdx: number;
+
+        if (shuffleEnabled) {
+          const rest = shuffleArray(songs.filter((s) => s.id !== song.id));
+          newQueue = [song, ...rest];
+          targetIdx = 0;
+        } else {
+          newQueue = [...songs]; // already sorted A-Z
+          targetIdx = songs.findIndex((s) => s.id === song.id);
+          if (targetIdx < 0) targetIdx = 0;
+        }
+
+        artworkMap.current = buildArtworkSequence(newQueue, imagePoolRef.current);
+        await TrackPlayer.setQueue(newQueue.map(songToTrack));
+        if (targetIdx > 0) await TrackPlayer.skip(targetIdx);
+        await TrackPlayer.play();
+        setQueue(newQueue);
+        setCurrentIndex(targetIdx);
+        await AsyncStorage.multiSet([
+          [STORAGE_KEYS.QUEUE, JSON.stringify(newQueue)],
+          [STORAGE_KEYS.CURRENT_INDEX, String(targetIdx)],
+        ]);
+      } catch (e) {
+        console.error("playSongFromLibrary error", e);
+      }
+    },
+    [shuffleEnabled, songs],
   );
 
   // ── Playback controls ─────────────────────────────────────────────────────
@@ -695,6 +741,7 @@ const [MusicContextProvider, useMusicContext] = createContextHook(() => {
     removeSongs,
     resetSetup,
     playSong,
+    playSongFromLibrary,
     togglePlayPause,
     playNext,
     playPrev,
