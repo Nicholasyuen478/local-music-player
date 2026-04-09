@@ -34,6 +34,7 @@ import { SongArtwork } from "@/components/SongArtwork";
 import { SeekBar } from "@/components/SeekBar";
 import { LyricsPanel } from "@/components/LyricsPanel";
 import { useLayout } from "@/hooks/useLayout";
+import { Event, useTrackPlayerEvents } from "react-native-track-player";
 
 const SWIPE_THRESHOLD = 60;
 
@@ -62,6 +63,33 @@ export default function PlayerScreen() {
     toggleShuffle,
     seekTo,
   } = useMusicContext();
+
+  // ── Native ID3 metadata (from react-native-track-player) ──────────────
+  // Overrides the filename-parsed title/artist when the native player
+  // extracts real embedded tags from the audio file.
+  const [nativeMeta, setNativeMeta] = useState<{ title: string; artist: string } | null>(null);
+
+  // Clear native meta on every track change — stale tags from the
+  // previous file must not bleed into the new track's lyrics search.
+  useEffect(() => {
+    setNativeMeta(null);
+  }, [currentSong?.id]);
+
+  // Listen for native ID3 / common metadata emitted by the audio engine.
+  // When real tags arrive they take priority over the filename-parsed fallback.
+  useTrackPlayerEvents([Event.MetadataCommonReceived], (event) => {
+    const { title, artist } = event.metadata ?? {};
+    if (title && artist) {
+      setNativeMeta({ title, artist });
+    } else if (title) {
+      // Artist absent in tags — keep the filename-parsed artist as fallback
+      setNativeMeta({ title, artist: currentSong?.artist ?? "" });
+    }
+  });
+
+  // ── Resolved title/artist: native ID3 tags > filename parse ───────────
+  const displayTitle  = nativeMeta?.title  ?? currentSong?.title  ?? "";
+  const displayArtist = nativeMeta?.artist ?? currentSong?.artist ?? "";
 
   // ── Artwork size: hero element — 88% of screen width ──────────────────
   const playerArtSize = Math.min(
@@ -455,10 +483,10 @@ export default function PlayerScreen() {
       <View style={[styles.infoRow, isCompact && styles.infoRowCompact]}>
         <View style={styles.infoText}>
           <Text style={[styles.songTitle, isCompact && styles.songTitleCompact]} numberOfLines={1}>
-            {currentSong?.title ?? "—"}
+            {displayTitle || "—"}
           </Text>
           <Text style={[styles.songArtist, isCompact && styles.songArtistCompact]} numberOfLines={1}>
-            {currentSong?.artist ?? `${songs.length} songs`}
+            {displayArtist || `${songs.length} songs`}
           </Text>
         </View>
 
@@ -551,8 +579,8 @@ export default function PlayerScreen() {
 
           {currentSong ? (
             <LyricsPanel
-              title={currentSong.title}
-              artist={currentSong.artist}
+              title={displayTitle}
+              artist={displayArtist}
               trackId={currentSong.id}
               position={status.currentTime ?? 0}
             />
