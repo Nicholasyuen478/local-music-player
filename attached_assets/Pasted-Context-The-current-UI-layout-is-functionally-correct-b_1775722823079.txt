@@ -1,0 +1,37 @@
+Context: The current UI layout is functionally correct, but visually it looks too basic. It does not look like the premium, high-fidelity mockup we want. We need to upgrade the visual components using proper Expo UI libraries to achieve a true "Glassmorphism" and ambient aesthetic, along with a few specific functional tweaks to menus and filters.
+
+CRITICAL: Please ensure `expo-blur`, `lucide-react-native`, and `@react-native-community/slider` are installed and used.
+
+Please execute the following visual and functional upgrades:
+
+1. Dynamic Ambient Background (Player Screen)
+- Place an `<Image>` of the current album artwork covering the `StyleSheet.absoluteFillObject`.
+- Immediately on top of that image, place a `<BlurView intensity={100} tint="dark" style={StyleSheet.absoluteFillObject} />`. This creates the deep, blurred ambient glow.
+- All player controls and text must sit on top of this BlurView.
+
+2. Glassmorphism Edit Button (Player Screen)
+- Replace the solid background of the "Edit/Gallery" button (bottom right of the artwork) with a `<BlurView intensity={50} tint="dark">`.
+- Give it a `borderRadius: 30`, `overflow: 'hidden'`, and a subtle `borderWidth: 1, borderColor: 'rgba(255,255,255,0.2)'`.
+- Put a white `<Image>` or Lucide icon inside it.
+
+3. Premium Icons & Slider
+- Replace all basic icons with `lucide-react-native` (e.g., `<ChevronDown color="white" />`, `<MoreHorizontal color="white" />`).
+- The main Play/Pause button should be a perfect circle with the warm amber/orange background, containing a crisp white `<Play fill="white" />` or `<Pause fill="white" />` icon.
+- Upgrade the track scrubber using `@react-native-community/slider`. Set `minimumTrackTintColor` to the warm amber/orange accent (`#FF8C00`), `maximumTrackTintColor` to `rgba(255,255,255,0.2)`, and make the thumb pure white.
+
+4. Artwork Polish
+- Ensure the main Album Artwork `Image` has `borderRadius: 24`.
+- Wrap it in a View with a strong shadow: `shadowColor: '#000', shadowOffset: {width: 0, height: 20}, shadowOpacity: 0.5, shadowRadius: 30, elevation: 15`.
+
+5. Top-Right Options Drop-down (Player Screen)
+- Currently, clicking the top-right options icon triggers a pop-up modal (showing "scan" and "clear").
+- REPLACE this modal pop-up with a sleek, absolute-positioned Drop-down menu that appears directly below the 3-dot icon.
+- Style the drop-down menu with a dark, semi-transparent background (or BlurView), rounded corners, and clean white text for the options.
+
+6. Library Screen Filters
+- Update the filter buttons/pills at the top of the Library Screen.
+- The order from left to right MUST be: "Recent" > "Songs" > "Artists".
+- The default active filter on load MUST be "Songs".
+- Style the active filter pill with the premium warm amber/orange accent, and the inactive pills as subtle dark gray/translucent.
+
+Task: Refactor the styles to use `BlurView`, `lucide-react-native`, the custom slider, change the player options to a drop-down, and fix the library filter order/defaults.

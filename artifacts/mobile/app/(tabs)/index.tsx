@@ -1,4 +1,5 @@
 import * as Haptics from "expo-haptics";
+import { BlurView } from "expo-blur";
 import { Image } from "expo-image";
 import {
   ChevronDown,
@@ -12,6 +13,7 @@ import {
   Shuffle,
   SkipBack,
   SkipForward,
+  Trash2,
 } from "lucide-react-native";
 import { router } from "expo-router";
 import React, { useState, useCallback, useRef, useEffect } from "react";
@@ -38,8 +40,9 @@ const SWIPE_THRESHOLD = 60;
 export default function PlayerScreen() {
   const { width, height, isCompact, topInset, bottomInset } = useLayout();
 
-  const [isScanning,  setIsScanning]  = useState(false);
-  const [lyricsOpen,  setLyricsOpen]  = useState(false);
+  const [isScanning,   setIsScanning]   = useState(false);
+  const [lyricsOpen,   setLyricsOpen]   = useState(false);
+  const [dropdownOpen, setDropdownOpen] = useState(false);
 
   const {
     currentSong,
@@ -217,12 +220,8 @@ export default function PlayerScreen() {
 
   const handleMore = useCallback(() => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-    Alert.alert("More Options", undefined, [
-      { text: "Scan library", onPress: handleScan },
-      { text: "Clear all songs", style: "destructive", onPress: handleClearAll },
-      { text: "Cancel", style: "cancel" },
-    ]);
-  }, [handleScan, handleClearAll]);
+    setDropdownOpen((v) => !v);
+  }, []);
 
   // ── Responsive sizes ───────────────────────────────────────────────────
   const iconSize   = isCompact ? 24 : 28;
@@ -347,10 +346,15 @@ export default function PlayerScreen() {
         <Image
           source={{ uri: currentArtworkUri }}
           style={StyleSheet.absoluteFillObject}
-          blurRadius={80}
           contentFit="cover"
         />
       )}
+      <BlurView
+        intensity={100}
+        tint="dark"
+        pointerEvents="none"
+        style={StyleSheet.absoluteFillObject}
+      />
       <View
         pointerEvents="none"
         style={[StyleSheet.absoluteFillObject, styles.ambientOverlay]}
@@ -377,6 +381,37 @@ export default function PlayerScreen() {
         </TouchableOpacity>
       </View>
 
+      {/* ── Dropdown options menu ── */}
+      {dropdownOpen && (
+        <>
+          <TouchableOpacity
+            style={StyleSheet.absoluteFillObject}
+            onPress={() => setDropdownOpen(false)}
+            activeOpacity={1}
+          />
+          <View style={[styles.dropdown, { top: topInset + 44 }]}>
+            <BlurView intensity={80} tint="dark" style={StyleSheet.absoluteFillObject} />
+            <TouchableOpacity
+              style={styles.dropdownItem}
+              onPress={() => { setDropdownOpen(false); handleScan(); }}
+              activeOpacity={0.7}
+            >
+              <ScanSearch size={15} color="#fff" />
+              <Text style={styles.dropdownText}>Scan library</Text>
+            </TouchableOpacity>
+            <View style={styles.dropdownSep} />
+            <TouchableOpacity
+              style={styles.dropdownItem}
+              onPress={() => { setDropdownOpen(false); handleClearAll(); }}
+              activeOpacity={0.7}
+            >
+              <Trash2 size={15} color={Colors.dark.danger} />
+              <Text style={[styles.dropdownText, styles.dropdownTextDanger]}>Clear all songs</Text>
+            </TouchableOpacity>
+          </View>
+        </>
+      )}
+
       {/* ── Artwork — hero element ── */}
       <View style={styles.artOuter}>
         <Animated.View
@@ -402,14 +437,16 @@ export default function PlayerScreen() {
             borderRadius={24}
           />
 
-          {/* ── Image gallery edit button — bottom-right of artwork ── */}
+          {/* ── Image gallery edit button — glassmorphism, bottom-right ── */}
           <TouchableOpacity
-            style={styles.artEditBtn}
+            style={styles.artEditBtnWrap}
             onPress={() => router.navigate("/(tabs)/images")}
             activeOpacity={0.8}
             hitSlop={14}
           >
-            <ImageIcon size={13} color="rgba(255,255,255,0.9)" />
+            <BlurView intensity={50} tint="dark" style={styles.artEditBtn}>
+              <ImageIcon size={14} color="#fff" />
+            </BlurView>
           </TouchableOpacity>
         </Animated.View>
       </View>
@@ -536,9 +573,9 @@ export default function PlayerScreen() {
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: Colors.dark.background },
 
-  // ── Ambient overlay (darkens blurred bg for legibility) ────────────
+  // ── Ambient overlay — extra darkening so text stays legible ──────────
   ambientOverlay: {
-    backgroundColor: "rgba(0,0,0,0.62)",
+    backgroundColor: "rgba(0,0,0,0.40)",
   },
 
   // ── Top bar ──────────────────────────────────────────────────────────
@@ -568,20 +605,57 @@ const styles = StyleSheet.create({
     paddingHorizontal: 10,
   },
 
-  // Image gallery edit button — frosted glass, overlaid bottom-right of artwork
-  artEditBtn: {
+  // Image gallery edit button — wrapper (for hitSlop)
+  artEditBtnWrap: {
     position: "absolute",
     bottom: 14,
     right: 14,
+    zIndex: 10,
+    borderRadius: 20,
+    overflow: "hidden",
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.22)",
+  },
+  // BlurView container inside the edit button
+  artEditBtn: {
     width: 36,
     height: 36,
-    borderRadius: 18,
-    backgroundColor: "rgba(0,0,0,0.55)",
-    borderWidth: 1,
-    borderColor: "rgba(255,255,255,0.30)",
+    borderRadius: 20,
     alignItems: "center",
     justifyContent: "center",
-    zIndex: 10,
+    overflow: "hidden",
+  },
+
+  // ── Options dropdown ──────────────────────────────────────────────────
+  dropdown: {
+    position: "absolute",
+    right: 12,
+    width: 200,
+    borderRadius: 14,
+    overflow: "hidden",
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: "rgba(255,255,255,0.15)",
+    zIndex: 200,
+  },
+  dropdownItem: {
+    flexDirection: "row",
+    alignItems: "center",
+    paddingVertical: 14,
+    paddingHorizontal: 16,
+    gap: 10,
+  },
+  dropdownText: {
+    color: "#fff",
+    fontSize: 15,
+    fontFamily: "Inter_400Regular",
+  },
+  dropdownTextDanger: {
+    color: Colors.dark.danger,
+  },
+  dropdownSep: {
+    height: StyleSheet.hairlineWidth,
+    backgroundColor: "rgba(255,255,255,0.12)",
+    marginHorizontal: 12,
   },
 
   // ── Song info ─────────────────────────────────────────────────────────

@@ -388,7 +388,7 @@ export default function LibraryScreen() {
       {/* ── Filter pills ── */}
       {!selectMode && (
         <View style={[styles.filterBar, isCompact && styles.filterBarCompact]}>
-          {(["songs", "artists", "recent"] as FilterMode[]).map((mode) => {
+          {(["recent", "songs", "artists"] as FilterMode[]).map((mode) => {
             const active = filterMode === mode;
             return (
               <TouchableOpacity
