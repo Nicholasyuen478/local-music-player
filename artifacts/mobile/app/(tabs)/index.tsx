@@ -15,6 +15,7 @@ import React, { useState, useCallback, useRef, useEffect } from "react";
 import {
   Alert,
   Animated,
+  Easing,
   PanResponder,
   StyleSheet,
   Text,
@@ -64,30 +65,58 @@ export default function PlayerScreen() {
   // Bottom padding: just safe-area + breathing room, no tab bar
   const playerBottomPad = bottomInset + (isCompact ? 14 : 24);
 
-  // ── Setup-page pulse rings ─────────────────────────────────────────────
-  const ring1 = useRef(new Animated.Value(0)).current;
-  const ring2 = useRef(new Animated.Value(0)).current;
-  const ring3 = useRef(new Animated.Value(0)).current;
+  // ── Setup-page animations ─────────────────────────────────────────────
+  const ring1    = useRef(new Animated.Value(0)).current;
+  const ring2    = useRef(new Animated.Value(0)).current;
+  const ring3    = useRef(new Animated.Value(0)).current;
+  const orbScale = useRef(new Animated.Value(1)).current;
+  const spinAnim = useRef(new Animated.Value(0)).current;
 
+  // Idle: staggered expanding rings
   useEffect(() => {
-    const DURATION = 2600;
+    const DURATION = 2800;
     const STEP = DURATION / 3;
-
     const makeLoop = (anim: Animated.Value, delay: number) =>
       Animated.loop(
         Animated.sequence([
           Animated.delay(delay),
-          Animated.timing(anim, { toValue: 1, duration: DURATION, useNativeDriver: true }),
+          Animated.timing(anim, {
+            toValue: 1, duration: DURATION,
+            easing: Easing.out(Easing.quad),
+            useNativeDriver: true,
+          }),
           Animated.timing(anim, { toValue: 0, duration: 0, useNativeDriver: true }),
         ]),
       );
-
     const l1 = makeLoop(ring1, 0);
     const l2 = makeLoop(ring2, STEP);
     const l3 = makeLoop(ring3, STEP * 2);
     l1.start(); l2.start(); l3.start();
     return () => { l1.stop(); l2.stop(); l3.stop(); };
   }, [ring1, ring2, ring3]);
+
+  // Scanning: continuous spin + gentle breathing scale
+  useEffect(() => {
+    if (isScanning || isLoading) {
+      spinAnim.setValue(0);
+      const spin = Animated.loop(
+        Animated.timing(spinAnim, {
+          toValue: 1, duration: 1400,
+          easing: Easing.linear,
+          useNativeDriver: true,
+        }),
+      );
+      const breathe = Animated.loop(
+        Animated.sequence([
+          Animated.timing(orbScale, { toValue: 1.08, duration: 700, easing: Easing.inOut(Easing.ease), useNativeDriver: true }),
+          Animated.timing(orbScale, { toValue: 1,    duration: 700, easing: Easing.inOut(Easing.ease), useNativeDriver: true }),
+        ]),
+      );
+      spin.start();
+      breathe.start();
+      return () => { spin.stop(); breathe.stop(); orbScale.setValue(1); };
+    }
+  }, [isScanning, isLoading, spinAnim, orbScale]);
 
   // ── Swipe animation ────────────────────────────────────────────────────
   const slideX       = useRef(new Animated.Value(0)).current;
@@ -194,50 +223,95 @@ export default function PlayerScreen() {
   const isEmpty = !isSetupDone || songs.length === 0;
 
   if (isEmpty) {
-    const orbSize = Math.min(width * 0.55, 220);
+    const orbSize  = Math.min(width * 0.62, 240);
+    const coreSize = orbSize * 0.48;
+    const scanning = isScanning || isLoading;
 
+    // Idle pulse rings
     const makeRingStyle = (anim: Animated.Value) => ({
-      opacity: anim.interpolate({ inputRange: [0, 0.4, 1], outputRange: [0, 0.45, 0] }),
-      transform: [{
-        scale: anim.interpolate({ inputRange: [0, 1], outputRange: [0.55, 1.7] }),
-      }],
+      opacity:   anim.interpolate({ inputRange: [0, 0.25, 0.7, 1], outputRange: [0, 0.55, 0.18, 0] }),
+      transform: [{ scale: anim.interpolate({ inputRange: [0, 1], outputRange: [0.45, 1.85] }) }],
     });
 
-    return (
-      <View style={[styles.setupContainer, { paddingTop: topInset, paddingBottom: playerBottomPad + 24 }]}>
+    // Spinning arc for loading
+    const spinDeg = spinAnim.interpolate({ inputRange: [0, 1], outputRange: ["0deg", "360deg"] });
 
-        {/* Bold title — top aligned like the reference */}
+    return (
+      <View style={[styles.setupContainer, { paddingTop: topInset, paddingBottom: playerBottomPad + 16 }]}>
+
+        {/* Caption — centered, changes on scan */}
         <View style={styles.setupHeader}>
           <Text style={[styles.setupTitle, isCompact && styles.setupTitleCompact]}>
-            Scan your{"\n"}music
+            {scanning ? "Finding\nyour music" : "Tap to\nscan"}
           </Text>
-          <Text style={styles.setupSubtitle}>Tap to start</Text>
+          <Text style={styles.setupSubtitle}>
+            {scanning ? "Scanning device storage…" : "Tap the orb to scan your device"}
+          </Text>
         </View>
 
-        {/* Pulsing orb */}
-        <View style={[styles.setupOrb, { width: orbSize, height: orbSize }]}>
-          {/* Pulse rings */}
-          <Animated.View style={[styles.ring, { width: orbSize, height: orbSize, borderRadius: orbSize / 2 }, makeRingStyle(ring1)]} />
-          <Animated.View style={[styles.ring, { width: orbSize, height: orbSize, borderRadius: orbSize / 2 }, makeRingStyle(ring2)]} />
-          <Animated.View style={[styles.ring, { width: orbSize, height: orbSize, borderRadius: orbSize / 2 }, makeRingStyle(ring3)]} />
-          {/* Core glow */}
-          <View style={[styles.orbCore, { width: orbSize * 0.52, height: orbSize * 0.52, borderRadius: orbSize * 0.26 }]}>
-            <View style={[styles.orbInner, { width: orbSize * 0.32, height: orbSize * 0.32, borderRadius: orbSize * 0.16 }]} />
-          </View>
-        </View>
-
-        {/* Single scan button */}
+        {/* Orb — tappable */}
         <TouchableOpacity
-          style={[styles.setupBtn, (isScanning || isLoading) && styles.setupBtnScanning]}
           onPress={handleScan}
-          disabled={isScanning || isLoading}
-          activeOpacity={0.82}
+          disabled={scanning}
+          activeOpacity={0.88}
+          style={[styles.setupOrb, { width: orbSize, height: orbSize }]}
         >
-          <ScanSearch size={18} color={(isScanning || isLoading) ? Colors.dark.accent : "#fff"} />
-          <Text style={[styles.setupBtnText, (isScanning || isLoading) && styles.setupBtnTextScanning]}>
-            {isScanning || isLoading ? "Scanning…" : "Scan songs from device"}
-          </Text>
+          {/* Idle: three staggered pulse rings */}
+          {!scanning && (
+            <>
+              <Animated.View style={[styles.ring, { width: orbSize, height: orbSize, borderRadius: orbSize / 2 }, makeRingStyle(ring1)]} />
+              <Animated.View style={[styles.ring, { width: orbSize, height: orbSize, borderRadius: orbSize / 2 }, makeRingStyle(ring2)]} />
+              <Animated.View style={[styles.ring, { width: orbSize, height: orbSize, borderRadius: orbSize / 2 }, makeRingStyle(ring3)]} />
+            </>
+          )}
+
+          {/* Loading: spinning segmented arc */}
+          {scanning && (
+            <Animated.View
+              style={[
+                styles.spinArc,
+                { width: orbSize, height: orbSize, borderRadius: orbSize / 2 },
+                { transform: [{ rotate: spinDeg }] },
+              ]}
+            />
+          )}
+
+          {/* Outer glow halo */}
+          <View style={[styles.orbHalo, { width: orbSize * 0.82, height: orbSize * 0.82, borderRadius: orbSize * 0.41 }]} />
+
+          {/* Core — scales while scanning */}
+          <Animated.View
+            style={[
+              styles.orbCore,
+              { width: coreSize, height: coreSize, borderRadius: coreSize / 2 },
+              { transform: [{ scale: orbScale }] },
+              scanning && styles.orbCoreScanning,
+            ]}
+          >
+            {/* Inner bright nucleus */}
+            <View
+              style={[
+                styles.orbNucleus,
+                {
+                  width: coreSize * 0.46,
+                  height: coreSize * 0.46,
+                  borderRadius: coreSize * 0.23,
+                },
+                scanning && styles.orbNucleusScanning,
+              ]}
+            />
+            {/* Icon */}
+            <ScanSearch
+              size={coreSize * 0.3}
+              color={scanning ? "#fff" : "rgba(255,255,255,0.7)"}
+            />
+          </Animated.View>
         </TouchableOpacity>
+
+        {/* Hint label at bottom */}
+        <Text style={styles.setupHint}>
+          {scanning ? "" : "Reads metadata from audio files on your device"}
+        </Text>
 
       </View>
     );
@@ -520,24 +594,26 @@ const styles = StyleSheet.create({
   setupContainer: {
     flex: 1,
     backgroundColor: Colors.dark.background,
+    alignItems: "center",
     justifyContent: "space-between",
   },
 
   setupHeader: {
-    paddingHorizontal: 28,
-    paddingTop: 12,
-    gap: 8,
+    alignSelf: "stretch",
+    paddingHorizontal: 32,
+    paddingTop: 16,
+    gap: 10,
   },
   setupTitle: {
     color: Colors.dark.text,
-    fontSize: 36,
+    fontSize: 42,
     fontFamily: "Inter_700Bold",
-    letterSpacing: -1,
-    lineHeight: 42,
+    letterSpacing: -1.5,
+    lineHeight: 48,
   },
-  setupTitleCompact: { fontSize: 28, lineHeight: 34 },
+  setupTitleCompact: { fontSize: 32, lineHeight: 38 },
   setupSubtitle: {
-    color: Colors.dark.textTertiary,
+    color: Colors.dark.textSecondary,
     fontSize: 14,
     fontFamily: "Inter_400Regular",
     letterSpacing: 0.1,
@@ -548,50 +624,68 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
   },
+
+  // Idle pulse rings — fade-expand outward
   ring: {
     position: "absolute",
     borderWidth: 1.5,
     borderColor: Colors.dark.accent,
   },
-  orbCore: {
-    backgroundColor: "rgba(108,99,255,0.18)",
-    alignItems: "center",
-    justifyContent: "center",
-    borderWidth: 1,
-    borderColor: "rgba(108,99,255,0.35)",
-  },
-  orbInner: {
-    backgroundColor: Colors.dark.accent,
-    opacity: 0.55,
+
+  // Loading: spinning dashed arc
+  spinArc: {
+    position: "absolute",
+    borderWidth: 2.5,
+    borderColor: "transparent",
+    borderTopColor: Colors.dark.accent,
+    borderRightColor: "rgba(108,99,255,0.4)",
   },
 
-  setupBtn: {
-    flexDirection: "row",
+  // Soft halo behind core
+  orbHalo: {
+    position: "absolute",
+    backgroundColor: "rgba(108,99,255,0.07)",
+    borderWidth: 1,
+    borderColor: "rgba(108,99,255,0.14)",
+  },
+
+  // Glassy core circle
+  orbCore: {
+    backgroundColor: "rgba(108,99,255,0.22)",
+    borderWidth: 1.5,
+    borderColor: "rgba(108,99,255,0.55)",
     alignItems: "center",
     justifyContent: "center",
-    gap: 10,
-    marginHorizontal: 28,
-    paddingVertical: 18,
-    borderRadius: 50,
-    backgroundColor: Colors.dark.accent,
     shadowColor: Colors.dark.accent,
-    shadowOffset: { width: 0, height: 6 },
-    shadowOpacity: 0.35,
-    shadowRadius: 14,
-    elevation: 8,
+    shadowOffset: { width: 0, height: 0 },
+    shadowOpacity: 0.55,
+    shadowRadius: 22,
+    elevation: 10,
   },
-  setupBtnScanning: {
-    backgroundColor: Colors.dark.surface,
-    shadowOpacity: 0,
-    elevation: 0,
+  orbCoreScanning: {
+    backgroundColor: "rgba(108,99,255,0.38)",
+    borderColor: Colors.dark.accent,
+    shadowOpacity: 0.8,
+    shadowRadius: 30,
   },
-  setupBtnText: {
-    color: "#fff",
-    fontSize: 15,
-    fontFamily: "Inter_600SemiBold",
+
+  // Bright nucleus dot
+  orbNucleus: {
+    position: "absolute",
+    backgroundColor: "rgba(108,99,255,0.3)",
   },
-  setupBtnTextScanning: {
-    color: Colors.dark.accent,
+  orbNucleusScanning: {
+    backgroundColor: "rgba(108,99,255,0.5)",
+  },
+
+  setupHint: {
+    color: Colors.dark.textTertiary,
+    fontSize: 12,
+    fontFamily: "Inter_400Regular",
+    letterSpacing: 0.2,
+    textAlign: "center",
+    paddingHorizontal: 40,
+    minHeight: 16,
   },
 
 });
