@@ -589,10 +589,11 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
     paddingHorizontal: 28,
-    marginBottom: 6,
+    marginTop: 8,
+    marginBottom: 8,
     gap: 12,
   },
-  infoRowCompact: { marginBottom: 2 },
+  infoRowCompact: { marginTop: 4, marginBottom: 4 },
   infoText: { flex: 1 },
 
   songTitle: {
@@ -628,8 +629,8 @@ const styles = StyleSheet.create({
   },
 
   // ── Seek bar ──────────────────────────────────────────────────────────
-  seekSection: { paddingHorizontal: 20, marginBottom: 6 },
-  seekSectionCompact: { marginBottom: 2 },
+  seekSection: { paddingHorizontal: 20, marginBottom: 10 },
+  seekSectionCompact: { marginBottom: 6 },
 
   // ── Controls ──────────────────────────────────────────────────────────
   controls: {
@@ -637,7 +638,7 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
     paddingHorizontal: 24,
-    paddingBottom: 4,
+    paddingBottom: 6,
     gap: 36,
   },
 
@@ -647,13 +648,13 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
     gap: 6,
-    paddingVertical: 10,
-    marginHorizontal: 60,
-    marginTop: 4,
+    paddingVertical: 12,
+    marginHorizontal: 52,
+    marginTop: 20,
     borderRadius: 20,
-    backgroundColor: Colors.dark.surface,
+    backgroundColor: "rgba(30,30,30,0.72)",
     borderWidth: StyleSheet.hairlineWidth,
-    borderColor: Colors.dark.border,
+    borderColor: Colors.dark.borderLight,
   },
   lyricsStripLabel: {
     color: Colors.dark.textTertiary,
@@ -710,7 +711,7 @@ const styles = StyleSheet.create({
     borderRadius: 28,
     alignItems: "center",
     justifyContent: "center",
-    backgroundColor: Colors.dark.surfaceSecondary,
+    backgroundColor: "rgba(255,255,255,0.06)",
   },
   playBtn: {
     backgroundColor: Colors.dark.accent,

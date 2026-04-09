@@ -15,9 +15,9 @@ export default function TabLayout() {
 
   const tabBarBase = {
     position: "absolute" as const,
-    backgroundColor: isIOS ? "transparent" : "rgba(10,10,18,0.97)",
-    borderTopWidth: StyleSheet.hairlineWidth,
-    borderTopColor: Colors.dark.border,
+    backgroundColor: isIOS ? "transparent" : "rgba(8,8,8,0.97)",
+    borderTopWidth: 0.5,
+    borderTopColor: Colors.dark.borderLight,
     elevation: 0,
     height: tabBarHeight,
   };
@@ -38,11 +38,11 @@ export default function TabLayout() {
         tabBarStyle: tabBarBase,
         tabBarBackground: () =>
           isIOS ? (
-            <BlurView intensity={85} tint="dark" style={StyleSheet.absoluteFill} />
+            <BlurView intensity={90} tint="systemChromeMaterialDark" style={StyleSheet.absoluteFill} />
           ) : (
-            <View style={[StyleSheet.absoluteFill, { backgroundColor: "rgba(10,10,18,0.97)" }]} />
+            <View style={[StyleSheet.absoluteFill, { backgroundColor: "rgba(8,8,8,0.97)" }]} />
           ),
-        tabBarIconStyle: { marginTop: isCompact ? 2 : 6 },
+        tabBarIconStyle: { marginTop: isCompact ? 1 : 4 },
       }}
     >
       {/* Library — left */}

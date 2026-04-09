@@ -666,14 +666,14 @@ const styles = StyleSheet.create({
 
   rowText: { flex: 1 },
   title: {
-    color: Colors.dark.textSecondary,
+    color: Colors.dark.text,
     fontSize: 15,
     fontFamily: "Inter_500Medium",
   },
   titleCompact: { fontSize: 14 },
-  titleActive:  { color: Colors.dark.text, fontFamily: "Inter_600SemiBold" },
+  titleActive:  { color: Colors.dark.accent, fontFamily: "Inter_600SemiBold" },
   artist: {
-    color: Colors.dark.textTertiary,
+    color: Colors.dark.textSecondary,
     fontSize: 12,
     fontFamily: "Inter_400Regular",
     marginTop: 3,
