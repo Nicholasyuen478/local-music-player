@@ -503,6 +503,7 @@ export default function PlayerScreen() {
             <LyricsPanel
               title={currentSong.title}
               artist={currentSong.artist}
+              trackId={currentSong.id}
               position={status.currentTime ?? 0}
             />
           ) : (
