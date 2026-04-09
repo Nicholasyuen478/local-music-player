@@ -225,8 +225,8 @@ export default function PlayerScreen() {
 
   // ── Responsive sizes ───────────────────────────────────────────────────
   const iconSize   = isCompact ? 24 : 28;
-  const playBtnSz  = isCompact ? 60 : 70;
-  const playIconSz = isCompact ? 28 : 34;
+  const playBtnSz  = isCompact ? 68 : 76;
+  const playIconSz = isCompact ? 30 : 36;
 
   // ══════════════════════════════════════════════════════════════════════
   // EMPTY STATE — no songs loaded yet
@@ -501,7 +501,7 @@ export default function PlayerScreen() {
           {status.playing ? (
             <Pause size={playIconSz} color="#fff" fill="#fff" />
           ) : (
-            <Play size={playIconSz} color="#fff" fill="#fff" style={{ marginLeft: 3 }} />
+            <Play size={playIconSz} color="#fff" fill="#fff" style={{ marginLeft: 4 }} />
           )}
         </TouchableOpacity>
 
@@ -788,13 +788,13 @@ const styles = StyleSheet.create({
     backgroundColor: "rgba(255,255,255,0.06)",
   },
   playBtn: {
-    backgroundColor: Colors.dark.accent,
+    backgroundColor: "#FF8C00",
     alignItems: "center",
     justifyContent: "center",
-    shadowColor: Colors.dark.accent,
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.55,
-    shadowRadius: 18,
+    shadowColor: "#FF8C00",
+    shadowOffset: { width: 0, height: 10 },
+    shadowOpacity: 0.4,
+    shadowRadius: 15,
     elevation: 12,
   },
 

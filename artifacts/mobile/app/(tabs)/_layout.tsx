@@ -1,6 +1,6 @@
 import { Tabs } from "expo-router";
 import { BlurView } from "expo-blur";
-import { ImageIcon, Library, Music2 } from "lucide-react-native";
+import { ImageIcon, Library, Music } from "lucide-react-native";
 import React from "react";
 import { Platform, Pressable, StyleSheet, useWindowDimensions, View } from "react-native";
 import Colors from "@/constants/colors";
@@ -63,8 +63,7 @@ export default function TabLayout() {
           tabBarItemStyle: styles.centreItem,
           tabBarIconStyle: { marginTop: 0 },
           tabBarStyle: { display: "none" },
-          tabBarButton: ({ onPress, onLongPress, accessibilityState }) => {
-            const active = accessibilityState?.selected ?? false;
+          tabBarButton: ({ onPress, onLongPress }) => {
             return (
               <Pressable
                 onPress={onPress}
@@ -72,8 +71,8 @@ export default function TabLayout() {
                 style={styles.centreBtn}
                 android_ripple={null}
               >
-                <View style={[styles.centreBtnOrb, active && styles.centreBtnOrbActive]}>
-                  <Music2 size={isCompact ? 24 : 26} color="#fff" />
+                <View style={styles.centreBtnOrb}>
+                  <Music size={28} color="#fff" fill="#fff" />
                 </View>
               </Pressable>
             );
@@ -106,25 +105,17 @@ const styles = StyleSheet.create({
     justifyContent: "center",
   },
   centreBtnOrb: {
-    width: 54,
-    height: 54,
-    borderRadius: 27,
-    backgroundColor: "rgba(232,112,42,0.30)",
+    width: 60,
+    height: 60,
+    borderRadius: 30,
+    backgroundColor: "#FF8C00",
     alignItems: "center",
     justifyContent: "center",
-    borderWidth: 1.5,
-    borderColor: "rgba(232,112,42,0.45)",
-    shadowColor: "#E8702A",
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.35,
-    shadowRadius: 10,
-    elevation: 6,
-  },
-  centreBtnOrbActive: {
-    backgroundColor: "#E8702A",
-    borderColor: "#F0913E",
-    shadowOpacity: 0.65,
-    shadowRadius: 18,
-    elevation: 12,
+    transform: [{ translateY: -15 }],
+    shadowColor: "#FF8C00",
+    shadowOffset: { width: 0, height: 8 },
+    shadowOpacity: 0.5,
+    shadowRadius: 12,
+    elevation: 10,
   },
 });

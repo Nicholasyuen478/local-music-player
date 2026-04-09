@@ -1,0 +1,27 @@
+Context: We need to perfectly replicate the premium UI for three specific components: the Center Music Home Button (in the tab bar), the Play/Pause Button (in the player), and the Progress Bar. They must match the premium art-centric mockup exactly.
+
+CRITICAL: Please use exact dimensions, colors, and shadow properties provided below. Ensure `expo-linear-gradient` and `lucide-react-native` are installed.
+
+1. Center Music Home Button (Bottom Tab Bar)
+- Make this button float slightly above the tab bar.
+- Container style: `width: 60`, `height: 60`, `borderRadius: 30`, `justifyContent: 'center'`, `alignItems: 'center'`, `bottom: 15` (to float it up).
+- Background Color: `#FF8C00` (Warm Amber/Orange).
+- Glow Effect (Shadow): `shadowColor: '#FF8C00'`, `shadowOffset: { width: 0, height: 8 }`, `shadowOpacity: 0.5`, `shadowRadius: 12`, `elevation: 10`.
+- Icon: Use the Lucide `<Music />` icon. Set `color="white"`, `size={28}`, and `fill="white"`.
+
+2. Play / Pause Button (Player Screen)
+- This should be the largest control on the screen.
+- Container style: `width: 76`, `height: 76`, `borderRadius: 38`, `justifyContent: 'center'`, `alignItems: 'center'`.
+- Background Color: `#FF8C00`.
+- Glow Effect (Shadow): `shadowColor: '#FF8C00'`, `shadowOffset: { width: 0, height: 10 }`, `shadowOpacity: 0.4`, `shadowRadius: 15`, `elevation: 12`.
+- Icon: Use Lucide `<Play />` or `<Pause />`. Set `color="white"`, `size={36}`, and `fill="white"`. (Ensure the Play icon is visually centered, which sometimes requires a slight `marginLeft: 4`).
+
+3. Premium Linear Gradient Progress Bar
+- Standard sliders look cheap. Please create a custom-styled slider wrapper or heavily customize `@react-native-community/slider`.
+- The "Filled" track (minimum track) must use a Linear Gradient from `#FF512F` to `#FF8C00`.
+- The "Empty" track (maximum track) should be `rgba(255,255,255,0.15)`.
+- Track thickness: `height: 6` with `borderRadius: 3`.
+- Thumb (Scrubber Dot): `width: 16`, `height: 16`, `borderRadius: 8`, `backgroundColor: '#FFFFFF'`, with a white shadow `shadowColor: '#FFF', shadowRadius: 6, shadowOpacity: 0.8`.
+- If using `@react-native-community/slider`, set `thumbTintColor="#FFFFFF"`, `minimumTrackTintColor="#FF8C00"`, and `maximumTrackTintColor="rgba(255,255,255,0.15)"` to get as close as possible if a true gradient track is too complex to implement flawlessly.
+
+Task: Update the tab bar and player screen stylesheets to implement these exact dimensions, colored shadows (glows), and icon fills.
