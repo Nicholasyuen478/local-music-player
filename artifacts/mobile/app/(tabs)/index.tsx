@@ -1,4 +1,5 @@
 import * as Haptics from "expo-haptics";
+import { Image } from "expo-image";
 import {
   ChevronDown,
   ChevronUp,
@@ -35,7 +36,7 @@ import { useLayout } from "@/hooks/useLayout";
 const SWIPE_THRESHOLD = 60;
 
 export default function PlayerScreen() {
-  const { width, height, isCompact, topInset, bottomInset, fontScale } = useLayout();
+  const { width, height, isCompact, topInset, bottomInset } = useLayout();
 
   const [isScanning,  setIsScanning]  = useState(false);
   const [lyricsOpen,  setLyricsOpen]  = useState(false);
@@ -59,11 +60,11 @@ export default function PlayerScreen() {
     seekTo,
   } = useMusicContext();
 
-  // ── Artwork size: full-screen player — 60-62% of screen height ──────────
+  // ── Artwork size: hero element — 88% of screen width ──────────────────
   const playerArtSize = Math.min(
-    width - 40,
-    Math.floor(height * (isCompact ? 0.52 : 0.62)),
-    360,
+    Math.floor(width * 0.88),
+    Math.floor(height * (isCompact ? 0.44 : 0.54)),
+    420,
   );
 
   // Bottom padding: safe-area only (tab bar is hidden on player screen)
@@ -224,8 +225,6 @@ export default function PlayerScreen() {
   }, [handleScan, handleClearAll]);
 
   // ── Responsive sizes ───────────────────────────────────────────────────
-  const titleSize  = Math.round(22 * fontScale);
-  const artistSize = Math.round(14 * fontScale);
   const iconSize   = isCompact ? 24 : 28;
   const playBtnSz  = isCompact ? 60 : 70;
   const playIconSz = isCompact ? 28 : 34;
@@ -343,18 +342,18 @@ export default function PlayerScreen() {
   return (
     <View style={[styles.container, { paddingTop: topInset }]}>
 
-      {/* ── Background accent glow ── */}
+      {/* ── Ambient blurred artwork background ── */}
+      {currentArtworkUri && (
+        <Image
+          source={{ uri: currentArtworkUri }}
+          style={StyleSheet.absoluteFillObject}
+          blurRadius={80}
+          contentFit="cover"
+        />
+      )}
       <View
         pointerEvents="none"
-        style={[
-          styles.bgGlow,
-          {
-            top: topInset + (isCompact ? 40 : 60),
-            width: playerArtSize * 1.1,
-            height: playerArtSize * 1.1,
-            borderRadius: playerArtSize * 0.55,
-          },
-        ]}
+        style={[StyleSheet.absoluteFillObject, styles.ambientOverlay]}
       />
 
       {/* ── Top bar: chevron-down (→ Library) | more ── */}
@@ -386,19 +385,21 @@ export default function PlayerScreen() {
             height: playerArtSize,
             transform: [{ translateX: slideX }],
             opacity: slideOpacity,
-            borderRadius: 20,
+            borderRadius: 24,
+            borderWidth: 1,
+            borderColor: "rgba(255,255,255,0.12)",
             shadowColor: "#000",
-            shadowOffset: { width: 0, height: 10 },
-            shadowOpacity: 0.45,
-            shadowRadius: 28,
-            elevation: 18,
+            shadowOffset: { width: 0, height: 16 },
+            shadowOpacity: 0.65,
+            shadowRadius: 40,
+            elevation: 24,
           }}
           {...panResponder.panHandlers}
         >
           <SongArtwork
             artworkUri={currentArtworkUri}
             size={playerArtSize}
-            borderRadius={20}
+            borderRadius={24}
           />
 
           {/* ── Image gallery edit button — bottom-right of artwork ── */}
@@ -416,10 +417,10 @@ export default function PlayerScreen() {
       {/* ── Song info + shuffle ── */}
       <View style={[styles.infoRow, isCompact && styles.infoRowCompact]}>
         <View style={styles.infoText}>
-          <Text style={[styles.songTitle, { fontSize: titleSize }]} numberOfLines={1}>
+          <Text style={[styles.songTitle, isCompact && styles.songTitleCompact]} numberOfLines={1}>
             {currentSong?.title ?? "—"}
           </Text>
-          <Text style={[styles.songArtist, { fontSize: artistSize }]} numberOfLines={1}>
+          <Text style={[styles.songArtist, isCompact && styles.songArtistCompact]} numberOfLines={1}>
             {currentSong?.artist ?? `${songs.length} songs`}
           </Text>
         </View>
@@ -535,16 +536,9 @@ export default function PlayerScreen() {
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: Colors.dark.background },
 
-  // ── Background glow ────────────────────────────────────────────────
-  bgGlow: {
-    position: "absolute",
-    alignSelf: "center",
-    backgroundColor: "rgba(232,112,42,0.07)",
-    shadowColor: Colors.dark.accent,
-    shadowOffset: { width: 0, height: 0 },
-    shadowOpacity: 0.25,
-    shadowRadius: 80,
-    elevation: 0,
+  // ── Ambient overlay (darkens blurred bg for legibility) ────────────
+  ambientOverlay: {
+    backgroundColor: "rgba(0,0,0,0.62)",
   },
 
   // ── Top bar ──────────────────────────────────────────────────────────
@@ -571,20 +565,20 @@ const styles = StyleSheet.create({
     flex: 1,
     alignItems: "center",
     justifyContent: "center",
-    paddingHorizontal: 22,
+    paddingHorizontal: 10,
   },
 
-  // Image gallery edit button — overlaid bottom-right of artwork
+  // Image gallery edit button — frosted glass, overlaid bottom-right of artwork
   artEditBtn: {
     position: "absolute",
-    bottom: 12,
-    right: 12,
-    width: 34,
-    height: 34,
-    borderRadius: 17,
-    backgroundColor: "rgba(0,0,0,0.52)",
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: "rgba(255,255,255,0.22)",
+    bottom: 14,
+    right: 14,
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    backgroundColor: "rgba(0,0,0,0.55)",
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.30)",
     alignItems: "center",
     justifyContent: "center",
     zIndex: 10,
@@ -602,15 +596,19 @@ const styles = StyleSheet.create({
   infoText: { flex: 1 },
 
   songTitle: {
-    color: Colors.dark.text,
+    color: "#fff",
     fontFamily: "Inter_700Bold",
-    letterSpacing: -0.4,
+    fontSize: 28,
+    letterSpacing: -0.5,
   },
+  songTitleCompact: { fontSize: 22 },
   songArtist: {
-    color: Colors.dark.textSecondary,
+    color: "rgba(255,255,255,0.65)",
     fontFamily: "Inter_400Regular",
-    marginTop: 4,
+    fontSize: 16,
+    marginTop: 5,
   },
+  songArtistCompact: { fontSize: 14, marginTop: 3 },
 
   shuffleWrap: { alignItems: "center" },
   shuffleBtn: {

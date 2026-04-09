@@ -1,6 +1,6 @@
 import * as Haptics from "expo-haptics";
-import { Check, ChevronRight, Clock, ListMusic, Music2, Search, Users, X } from "lucide-react-native";
-import { useFocusEffect } from "expo-router";
+import { Check, ChevronLeft, ChevronRight, Clock, ListMusic, Music2, Search, Users, X } from "lucide-react-native";
+import { router, useFocusEffect } from "expo-router";
 import React, {
   useCallback,
   useMemo,
@@ -9,6 +9,7 @@ import React, {
 } from "react";
 import {
   Alert,
+  BackHandler,
   FlatList,
   StyleSheet,
   Text,
@@ -55,7 +56,18 @@ export default function LibraryScreen() {
   const isListReady = useRef(false);
   const searchRef   = useRef<TextInput>(null);
 
-  const itemH = isCompact ? 56 : 64;
+  const itemH = isCompact ? 62 : 72;
+
+  // ── Hardware back → return to Player instead of exiting app ────────────
+  useFocusEffect(
+    useCallback(() => {
+      const sub = BackHandler.addEventListener("hardwareBackPress", () => {
+        router.navigate("/(tabs)");
+        return true;
+      });
+      return () => sub.remove();
+    }, []),
+  );
 
   // ── Filtered songs (search applied) ────────────────────────────────────
   const displayedSongs = useMemo(() => {
@@ -358,6 +370,13 @@ export default function LibraryScreen() {
           </>
         ) : (
           <>
+            <TouchableOpacity
+              onPress={() => router.navigate("/(tabs)")}
+              style={styles.iconCircle}
+              hitSlop={10}
+            >
+              <ChevronLeft size={isCompact ? 18 : 20} color={Colors.dark.textSecondary} />
+            </TouchableOpacity>
             <Text style={styles.headerCount}>{headerCount}</Text>
             <TouchableOpacity onPress={() => setShowQueue(true)} style={styles.iconCircle} hitSlop={8}>
               <ListMusic size={isCompact ? 15 : 16} color={Colors.dark.textSecondary} />

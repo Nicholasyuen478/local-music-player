@@ -1,0 +1,49 @@
+Here is the adjusted prompt. I have added a new **Section 6** to specifically address the bottom tab bar ("Settings" to "Image Gallery"), the Player's options popup, and the critical fix for the Library screen's back button / app-exit bug.
+
+***
+
+### Copy & Paste this updated prompt into Replit:
+
+```markdown
+Context: The navigation and base colors are looking great. Now, I want to apply premium UI/UX design principles to make the app feel "Fancy, Clear, and Art-Centric." The user's custom image is the most important element of the app, and the UI must frame it beautifully.
+
+CRITICAL RULES:
+- Do NOT change the TrackPlayer logic or local file reading.
+- Do NOT add new screens.
+- ONLY apply these advanced styling and layout enhancements.
+
+Please implement the following premium UI upgrades and functional fixes:
+
+1. Dynamic Ambient Background (Contextual Design)
+- On the full-screen Player Screen, replace the solid dark background with a dynamic ambient glow.
+- Behind the main UI, place a full-screen, severely blurred version of the CURRENT custom album artwork (e.g., using `expo-blur` or an absolute positioned `<Image>` with a heavy `blurRadius={50}` or `80`).
+- Add a dark, semi-transparent overlay (e.g., `rgba(0,0,0,0.6)`) over this blurred image so the white text and controls remain perfectly readable. This makes every song feel unique and highly visual.
+
+2. Hero Artwork Styling (Visual Hierarchy)
+- Make the central custom artwork perfectly square (aspectRatio: 1) and expand its width to take up 85% of the screen width. 
+- Increase the rounded corners (`borderRadius: 24`).
+- Add a subtle inner border (e.g., `borderWidth: 1, borderColor: 'rgba(255,255,255,0.1)'`) to give it a premium glass edge.
+- Enhance the drop shadow heavily to give it deep 3D separation from the background (`elevation: 20`, large shadow radius, and 50% opacity).
+
+3. Glassmorphism for the "Edit Image" Button
+- The floating "Gallery/Edit" icon button on the bottom-right of the artwork should not be a solid color block. 
+- Make it a "frosted glass" circle using a translucent background (e.g., `backgroundColor: 'rgba(0,0,0,0.4)'`) with a subtle white border and a white icon. This ensures it doesn't distract from the user's custom art but remains easily accessible.
+
+4. Typography & Spacing Polish (Legibility & Proximity)
+- Song Title: Make it larger and heavier (e.g., `fontSize: 28`, `fontWeight: '800'`). Ensure it is pure white (`#FFFFFF`).
+- Artist Name: Make it distinct through opacity, not just color (e.g., pure white with `opacity: 0.7`, `fontSize: 18`, `fontWeight: '500'`).
+- Group the track info, progress bar, and playback controls tightly together at the bottom of the screen to give the artwork maximum "breathing room" (whitespace) at the top.
+
+5. Premium List View (Library Screen) - NO THUMBNAILS
+- REMOVE any artwork/album thumbnails from the library list rows completely. Because users assign custom images randomly from their gallery, thumbnails will repeat and create visual noise.
+- Make the list text-first, clean, and minimalist: Song Title in crisp white, Artist Name smaller in muted gray below it.
+- Increase the vertical padding of the list rows slightly so the list breathes and doesn't feel cramped.
+- If needed, use an elegant text highlight color or a small icon (like an equalizer or play icon) to indicate the currently playing song, rather than an image.
+
+6. Navigation, Tab Bar & Functional Fixes
+- Bottom Tab Bar: Ensure the right-most tab is for the "Image Gallery" (Artwork), NOT "Settings".
+- Player Screen Options: Keep the top-right options button, but style it cleanly. Note that it currently triggers a pop-up (modal/bottom sheet) rather than a standard menu. Preserve this existing pop-up logic, just ensure the trigger icon looks premium.
+- Library Screen Back Navigation BUG FIX: The Library screen is currently missing a back button in the header, and pressing the hardware back button accidentally exits the app. Please add a visible "Back" icon to the top-left of the Library screen header to return to the Player screen. Also, intercept/fix the hardware back button behavior on the Library screen so it correctly routes back to the Player Screen instead of exiting the app.
+
+Task: Update the stylesheets and components to include the blurred ambient background, glassmorphism UI, refined text-only Library list, and fix the back navigation bugs.
+```
