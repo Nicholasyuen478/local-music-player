@@ -1,0 +1,23 @@
+Build failed
+
+Unable to resolve a valid config plugin for ./android-manifest-plugin.js.
+• No "app.plugin.js" file found in ./android-manifest-plugin.js: config plugins are typically exported from an "app.plugin.js" file in the package root.
+• main export of ./android-manifest-plugin.js does not appear to be a config plugin: the following error was thrown when importing /home/expo/workingdir/build/artifacts/mobile/android-manifest-plugin.js: Cannot find module '@expo/config-plugins'
+Require stack:
+- /home/expo/workingdir/build/artifacts/mobile/android-manifest-plugin.js
+- /usr/local/eas-build-worker/node_modules/@expo/config-plugins/build/utils/plugin-resolver.js
+- /usr/local/eas-build-worker/node_modules/@expo/config-plugins/build/plugins/withStaticPlugin.js
+- /usr/local/eas-build-worker/node_modules/@expo/config-plugins/build/plugins/withPlugins.js
+- /usr/local/eas-build-worker/node_modules/@expo/config-plugins/build/index.js
+- /usr/local/eas-build-worker/packages/build-tools/dist/utils/resolveRuntimeVersionAsync.js
+- /usr/local/eas-build-worker/packages/build-tools/dist/utils/expoUpdates.js
+- /usr/local/eas-build-worker/packages/build-tools/dist/steps/functions/calculateEASUpdateRuntimeVersion.js
+- /usr/local/eas-build-worker/packages/build-tools/dist/steps/functionGroups/build.js
+- /usr/local/eas-build-worker/packages/build-tools/dist/steps/easFunctionGroups.js
+- /usr/local/eas-build-worker/packages/build-tools/dist/builders/custom.js
+- /usr/local/eas-build-worker/packages/build-tools/dist/builders/android.js
+- /usr/local/eas-build-worker/packages/build-tools/dist/builders/index.js
+- /usr/local/eas-build-worker/packages/build-tools/dist/index.js
+- /usr/local/eas-build-worker/packages/worker/dist/config.js
+- /usr/local/eas-build-worker/packages/worker/dist/main.js MODULE_NOT_FOUND
+Verify that ./android-manifest-plugin.js includes a config plugin. If it does not, then remove the entry from plugins in your app config file. Learn more: https://docs.expo.dev/guides/config-plugins/

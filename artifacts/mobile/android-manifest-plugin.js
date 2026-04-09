@@ -1,4 +1,6 @@
-const { withAndroidManifest } = require('@expo/config-plugins');
+const { withAndroidManifest } = require(
+  require.resolve('@expo/config-plugins', { paths: [__dirname] })
+);
 
 module.exports = function withSingleTaskLaunchMode(config) {
   return withAndroidManifest(config, (config) => {
