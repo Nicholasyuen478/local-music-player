@@ -1,0 +1,28 @@
+Context: This is a pure UI/UX architecture update for my React Native/Expo local music player. The core selling point is the user's custom imported album artwork. 
+
+CRITICAL RULES: 
+- Do NOT add new features.
+- Do NOT change the audio playback logic (TrackPlayer).
+- Do NOT change how the app reads local files.
+- ONLY update the UI layout, navigation structure, and styling based on the "Art-Centric" design system below.
+
+1. Navigation Architecture (Modal / Player-First Pattern)
+- Refactor the navigation (e.g., Expo Router layout or React Navigation).
+- The Player Screen must be the initial/default screen when the app opens.
+- REMOVE the global bottom navigation tab bar completely from the Player Screen. The Player must be an immersive, full-screen view.
+- Add a top-left "Chevron Down" icon button on the Player Screen. Pressing this should navigate down/back to the Library Screen.
+- On the Library Screen (and any other secondary screens), the bottom navigation bar should be visible. 
+- In the center of this bottom tab bar, add a prominent Music Icon (styled like a Floating Action Button, perhaps with a warm accent color background). Pressing this center icon takes the user back to the Player Screen.
+
+2. Player Screen UI (The Focal Point)
+- Aesthetic: Dark mode (deep blacks/dark grays), minimalist, premium feel.
+- Artwork: The custom album artwork must be the absolute center of attention. Make it take up 60-70% of the vertical screen space. Apply clean rounded corners (e.g., border-radius: 20) and a soft, deep drop shadow for elevation.
+- Edit/Gallery Button: Remove any existing navigation bar for the Image Gallery. Instead, place a subtle, elegant "Edit" or "Image" icon button floating overlapping the bottom-right corner of the album artwork. Tapping this opens the Image Gallery modal.
+- Track Info: Place the song title (large, bold, white) and artist (smaller, muted gray) cleanly below the artwork.
+- Controls: Make the progress bar slim with a warm accent color (e.g., orange/amber). Place the play/pause/skip controls cleanly below the track info in a minimalist row. The Play/Pause button should be the most prominent.
+
+3. Library Screen UI
+- Display a clean, modern list view for the Music Library on a dark background.
+- Each list item should have a small rounded square thumbnail of the album art, the song title in white, and the artist name in gray.
+
+Task: Please refactor the layout/navigation files to achieve this Player-first + Center Tab Icon architecture, and update the Player and Library screen stylesheets to match this highly visual, dark-themed, art-centric layout.

@@ -55,14 +55,14 @@ export default function TabLayout() {
         }}
       />
 
-      {/* Player — centre hero button */}
+      {/* Player — centre hero button; tab bar hidden when this screen is active */}
       <Tabs.Screen
         name="index"
         options={{
           tabBarLabel: "",
           tabBarItemStyle: styles.centreItem,
           tabBarIconStyle: { marginTop: 0 },
-          tabBarStyle: tabBarBase,
+          tabBarStyle: { display: "none" },
           tabBarButton: ({ onPress, onLongPress, accessibilityState }) => {
             const active = accessibilityState?.selected ?? false;
             return (

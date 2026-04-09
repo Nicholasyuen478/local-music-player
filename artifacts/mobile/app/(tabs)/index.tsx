@@ -1,5 +1,6 @@
 import * as Haptics from "expo-haptics";
 import {
+  ChevronDown,
   ChevronUp,
   ImageIcon,
   MicVocal,
@@ -34,7 +35,7 @@ import { useLayout } from "@/hooks/useLayout";
 const SWIPE_THRESHOLD = 60;
 
 export default function PlayerScreen() {
-  const { width, height, isCompact, topInset, bottomInset, tabBarH, fontScale } = useLayout();
+  const { width, height, isCompact, topInset, bottomInset, fontScale } = useLayout();
 
   const [isScanning,  setIsScanning]  = useState(false);
   const [lyricsOpen,  setLyricsOpen]  = useState(false);
@@ -58,15 +59,15 @@ export default function PlayerScreen() {
     seekTo,
   } = useMusicContext();
 
-  // ── Artwork size — accounts for tab bar + lyrics strip ─────────────────
+  // ── Artwork size: full-screen player — 60-62% of screen height ──────────
   const playerArtSize = Math.min(
-    width - 44,
-    Math.floor(height * (isCompact ? 0.38 : 0.46)),
-    320,
+    width - 40,
+    Math.floor(height * (isCompact ? 0.52 : 0.62)),
+    360,
   );
 
-  // Bottom padding: safe-area + tab bar + breathing room
-  const playerBottomPad = bottomInset + tabBarH + (isCompact ? 8 : 12);
+  // Bottom padding: safe-area only (tab bar is hidden on player screen)
+  const playerBottomPad = bottomInset + (isCompact ? 16 : 24);
 
   // ── Setup-page animations ─────────────────────────────────────────────
   const ring1    = useRef(new Animated.Value(0)).current;
@@ -340,8 +341,17 @@ export default function PlayerScreen() {
         ]}
       />
 
-      {/* ── Top bar: scan + trash (right-aligned) ── */}
+      {/* ── Top bar: chevron-down (→ Library) | scan + trash ── */}
       <View style={[styles.topBar, isCompact && styles.topBarCompact]}>
+        <TouchableOpacity
+          onPress={() => router.navigate("/(tabs)/library")}
+          style={styles.utilBtnSmall}
+          activeOpacity={0.6}
+          hitSlop={10}
+        >
+          <ChevronDown size={22} color={Colors.dark.textSecondary} />
+        </TouchableOpacity>
+
         <View style={styles.topRight}>
           <TouchableOpacity
             onPress={handleScan}
@@ -487,7 +497,7 @@ export default function PlayerScreen() {
         />
 
         {/* Sheet */}
-        <View style={[styles.lyricsSheet, { height: height * 0.62, paddingBottom: bottomInset + tabBarH }]}>
+        <View style={[styles.lyricsSheet, { height: height * 0.62, paddingBottom: bottomInset }]}>
           {/* Drag handle */}
           <View style={styles.lyricsHandle} />
 
@@ -539,7 +549,7 @@ const styles = StyleSheet.create({
   topBar: {
     flexDirection: "row",
     alignItems: "center",
-    justifyContent: "flex-end",
+    justifyContent: "space-between",
     paddingHorizontal: 16,
     paddingTop: 4,
     paddingBottom: 2,

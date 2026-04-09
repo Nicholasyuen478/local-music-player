@@ -35,9 +35,9 @@ export function SeekBar({ duration, position, onSeek }: Props) {
           setDragging(false);
           onSeek(v);
         }}
-        minimumTrackTintColor={Colors.dark.accent}
+        minimumTrackTintColor="#F59E0B"
         maximumTrackTintColor="rgba(255,255,255,0.12)"
-        thumbTintColor={Colors.dark.accentLight}
+        thumbTintColor="#FCD34D"
         tapToSeek
       />
       <View style={styles.labels}>
