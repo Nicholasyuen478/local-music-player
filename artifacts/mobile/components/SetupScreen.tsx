@@ -70,7 +70,7 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
     borderWidth: 1.5,
-    borderColor: "rgba(108,99,255,0.3)",
+    borderColor: "rgba(232,112,42,0.3)",
   },
   textBlock: {
     alignItems: "center",

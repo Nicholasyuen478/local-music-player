@@ -383,9 +383,9 @@ export default function LibraryScreen() {
                 }}
                 activeOpacity={0.75}
               >
-                {mode === "songs"   && <Music2 size={12} color={active ? "#fff" : Colors.dark.textTertiary} />}
-                {mode === "artists" && <Users  size={12} color={active ? "#fff" : Colors.dark.textTertiary} />}
-                {mode === "recent"  && <Clock  size={12} color={active ? "#fff" : Colors.dark.textTertiary} />}
+                {mode === "songs"   && <Music2 size={12} color={active ? Colors.dark.accent : Colors.dark.textTertiary} />}
+                {mode === "artists" && <Users  size={12} color={active ? Colors.dark.accent : Colors.dark.textTertiary} />}
+                {mode === "recent"  && <Clock  size={12} color={active ? Colors.dark.accent : Colors.dark.textTertiary} />}
                 <Text style={[styles.filterText, active && styles.filterTextActive]}>
                   {mode === "songs" ? "Songs" : mode === "artists" ? "Artists" : "Recent"}
                 </Text>
@@ -548,7 +548,7 @@ const styles = StyleSheet.create({
     borderColor: Colors.dark.border,
   },
   filterPillActive: {
-    backgroundColor: Colors.dark.accent,
+    backgroundColor: Colors.dark.accentDim,
     borderColor: Colors.dark.accent,
   },
   filterText: {
@@ -556,7 +556,7 @@ const styles = StyleSheet.create({
     fontSize: 13,
     fontFamily: "Inter_500Medium",
   },
-  filterTextActive: { color: "#fff" },
+  filterTextActive: { color: Colors.dark.accent },
 
   // ── Search bar ────────────────────────────────────────────────────────
   searchRow: {
@@ -594,7 +594,7 @@ const styles = StyleSheet.create({
     borderBottomColor: Colors.dark.border,
   },
   sectionHeaderSelected: {
-    backgroundColor: "rgba(108,99,255,0.10)",
+    backgroundColor: Colors.dark.accentDim,
   },
   sectionContent: {
     flex: 1,
@@ -627,8 +627,8 @@ const styles = StyleSheet.create({
     borderBottomWidth: StyleSheet.hairlineWidth,
     borderBottomColor: Colors.dark.border,
   },
-  rowActive:   { backgroundColor: "rgba(108,99,255,0.07)" },
-  rowSelected: { backgroundColor: "rgba(108,99,255,0.12)" },
+  rowActive:   { backgroundColor: "rgba(232,112,42,0.07)" },
+  rowSelected: { backgroundColor: "rgba(232,112,42,0.12)" },
 
   checkbox: {
     width: 22,

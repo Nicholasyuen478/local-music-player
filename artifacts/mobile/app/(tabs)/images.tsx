@@ -2,7 +2,7 @@ import * as Haptics from "expo-haptics";
 import { Image } from "expo-image";
 import * as ImagePicker from "expo-image-picker";
 import { router } from "expo-router";
-import { ImageIcon, Music2, Plus, Scissors, X } from "lucide-react-native";
+import { ImageIcon, Plus, Scissors, X } from "lucide-react-native";
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import {
   ActivityIndicator,
@@ -172,14 +172,6 @@ export default function ImagesScreen() {
           {imagePool.length > 0 ? `${imagePool.length} images` : "Artwork pool"}
         </Text>
         <View style={styles.headerRight}>
-          {/* Back to Player */}
-          <TouchableOpacity
-            onPress={() => router.navigate("/(tabs)/")}
-            style={styles.iconCircle}
-            hitSlop={8}
-          >
-            <Music2 size={isCompact ? 15 : 16} color={Colors.dark.textSecondary} />
-          </TouchableOpacity>
           <TouchableOpacity
             style={[styles.addBtn, isAdding && styles.addBtnLoading]}
             onPress={handlePickFiles}

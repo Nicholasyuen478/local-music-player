@@ -6,10 +6,9 @@ import {
 } from "@expo-google-fonts/inter";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { useFonts } from "expo-font";
-import { router, Stack } from "expo-router";
+import { Stack } from "expo-router";
 import * as SplashScreen from "expo-splash-screen";
 import React, { useEffect } from "react";
-import { Linking } from "react-native";
 import { GestureHandlerRootView } from "react-native-gesture-handler";
 import { SafeAreaProvider } from "react-native-safe-area-context";
 
@@ -20,31 +19,7 @@ SplashScreen.preventAutoHideAsync();
 
 const queryClient = new QueryClient();
 
-function goToPlayer() {
-  try { router.navigate("/(tabs)/"); } catch { /* already there */ }
-}
-
 function RootLayoutNav() {
-  // Cold-start: app opened via notification deep link
-  useEffect(() => {
-    Linking.getInitialURL().then((url) => {
-      if (url && url.includes("notification.click")) {
-        // Give the navigation tree a moment to mount
-        setTimeout(goToPlayer, 400);
-      }
-    });
-  }, []);
-
-  // Foreground / background: RNTP fires the URL while app is running
-  useEffect(() => {
-    const sub = Linking.addEventListener("url", ({ url }) => {
-      if (url.includes("notification.click")) {
-        setTimeout(goToPlayer, 0);
-      }
-    });
-    return () => sub.remove();
-  }, []);
-
   return (
     <Stack screenOptions={{ headerShown: false }}>
       <Stack.Screen name="(tabs)" options={{ headerShown: false }} />

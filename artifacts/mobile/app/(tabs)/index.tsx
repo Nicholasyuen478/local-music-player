@@ -4,13 +4,13 @@ import {
   ChevronUp,
   ImageIcon,
   MicVocal,
+  MoreVertical,
   Pause,
   Play,
   ScanSearch,
   Shuffle,
   SkipBack,
   SkipForward,
-  Trash2,
 } from "lucide-react-native";
 import { router } from "expo-router";
 import React, { useState, useCallback, useRef, useEffect } from "react";
@@ -214,6 +214,15 @@ export default function PlayerScreen() {
     toggleShuffle();
   }, [toggleShuffle]);
 
+  const handleMore = useCallback(() => {
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    Alert.alert("More Options", undefined, [
+      { text: "Scan library", onPress: handleScan },
+      { text: "Clear all songs", style: "destructive", onPress: handleClearAll },
+      { text: "Cancel", style: "cancel" },
+    ]);
+  }, [handleScan, handleClearAll]);
+
   // ── Responsive sizes ───────────────────────────────────────────────────
   const titleSize  = Math.round(22 * fontScale);
   const artistSize = Math.round(14 * fontScale);
@@ -224,6 +233,13 @@ export default function PlayerScreen() {
   // ══════════════════════════════════════════════════════════════════════
   // EMPTY STATE — no songs loaded yet
   // ══════════════════════════════════════════════════════════════════════
+
+  // While the context is hydrating from storage, show a blank dark screen
+  // instead of briefly flashing the setup page
+  if (isLoading) {
+    return <View style={{ flex: 1, backgroundColor: Colors.dark.background }} />;
+  }
+
   const isEmpty = !isSetupDone || songs.length === 0;
 
   if (isEmpty) {
@@ -341,7 +357,7 @@ export default function PlayerScreen() {
         ]}
       />
 
-      {/* ── Top bar: chevron-down (→ Library) | scan + trash ── */}
+      {/* ── Top bar: chevron-down (→ Library) | more ── */}
       <View style={[styles.topBar, isCompact && styles.topBarCompact]}>
         <TouchableOpacity
           onPress={() => router.navigate("/(tabs)/library")}
@@ -352,28 +368,14 @@ export default function PlayerScreen() {
           <ChevronDown size={22} color={Colors.dark.textSecondary} />
         </TouchableOpacity>
 
-        <View style={styles.topRight}>
-          <TouchableOpacity
-            onPress={handleScan}
-            style={styles.utilBtnSmall}
-            activeOpacity={0.6}
-            disabled={isScanning}
-            hitSlop={8}
-          >
-            <ScanSearch
-              size={16}
-              color={isScanning ? Colors.dark.accent : Colors.dark.textTertiary}
-            />
-          </TouchableOpacity>
-          <TouchableOpacity
-            onPress={handleClearAll}
-            style={styles.utilBtnSmall}
-            activeOpacity={0.6}
-            hitSlop={8}
-          >
-            <Trash2 size={16} color={Colors.dark.textTertiary} />
-          </TouchableOpacity>
-        </View>
+        <TouchableOpacity
+          onPress={handleMore}
+          style={styles.utilBtnSmall}
+          activeOpacity={0.6}
+          hitSlop={10}
+        >
+          <MoreVertical size={20} color={Colors.dark.textSecondary} />
+        </TouchableOpacity>
       </View>
 
       {/* ── Artwork — hero element ── */}
@@ -459,9 +461,9 @@ export default function PlayerScreen() {
           style={[styles.playBtn, { width: playBtnSz, height: playBtnSz, borderRadius: playBtnSz / 2 }]}
         >
           {status.playing ? (
-            <Pause size={playIconSz} color={Colors.dark.background} fill={Colors.dark.background} />
+            <Pause size={playIconSz} color="#fff" fill="#fff" />
           ) : (
-            <Play size={playIconSz} color={Colors.dark.background} fill={Colors.dark.background} style={{ marginLeft: 3 }} />
+            <Play size={playIconSz} color="#fff" fill="#fff" style={{ marginLeft: 3 }} />
           )}
         </TouchableOpacity>
 
@@ -537,7 +539,7 @@ const styles = StyleSheet.create({
   bgGlow: {
     position: "absolute",
     alignSelf: "center",
-    backgroundColor: "rgba(108,99,255,0.07)",
+    backgroundColor: "rgba(232,112,42,0.07)",
     shadowColor: Colors.dark.accent,
     shadowOffset: { width: 0, height: 0 },
     shadowOpacity: 0.25,
@@ -555,7 +557,6 @@ const styles = StyleSheet.create({
     paddingBottom: 2,
   },
   topBarCompact: { paddingTop: 2, paddingBottom: 1 },
-  topRight: { flexDirection: "row", alignItems: "center", gap: 2 },
 
   utilBtnSmall: {
     width: 38,
@@ -714,14 +715,14 @@ const styles = StyleSheet.create({
     backgroundColor: Colors.dark.surfaceSecondary,
   },
   playBtn: {
-    backgroundColor: Colors.dark.text,
+    backgroundColor: Colors.dark.accent,
     alignItems: "center",
     justifyContent: "center",
-    shadowColor: "#fff",
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.15,
-    shadowRadius: 8,
-    elevation: 6,
+    shadowColor: Colors.dark.accent,
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.55,
+    shadowRadius: 18,
+    elevation: 12,
   },
 
   // ══ Setup / empty state ═══════════════════════════════════════════════
@@ -772,22 +773,22 @@ const styles = StyleSheet.create({
     borderWidth: 2.5,
     borderColor: "transparent",
     borderTopColor: Colors.dark.accent,
-    borderRightColor: "rgba(108,99,255,0.4)",
+    borderRightColor: "rgba(232,112,42,0.4)",
   },
 
   // Soft halo behind core
   orbHalo: {
     position: "absolute",
-    backgroundColor: "rgba(108,99,255,0.07)",
+    backgroundColor: "rgba(232,112,42,0.07)",
     borderWidth: 1,
-    borderColor: "rgba(108,99,255,0.14)",
+    borderColor: "rgba(232,112,42,0.18)",
   },
 
   // Glassy core circle
   orbCore: {
-    backgroundColor: "rgba(108,99,255,0.22)",
+    backgroundColor: "rgba(232,112,42,0.20)",
     borderWidth: 1.5,
-    borderColor: "rgba(108,99,255,0.55)",
+    borderColor: "rgba(232,112,42,0.55)",
     alignItems: "center",
     justifyContent: "center",
     shadowColor: Colors.dark.accent,
@@ -797,7 +798,7 @@ const styles = StyleSheet.create({
     elevation: 10,
   },
   orbCoreScanning: {
-    backgroundColor: "rgba(108,99,255,0.38)",
+    backgroundColor: "rgba(232,112,42,0.38)",
     borderColor: Colors.dark.accent,
     shadowOpacity: 0.8,
     shadowRadius: 30,
@@ -806,10 +807,10 @@ const styles = StyleSheet.create({
   // Bright nucleus dot
   orbNucleus: {
     position: "absolute",
-    backgroundColor: "rgba(108,99,255,0.3)",
+    backgroundColor: "rgba(232,112,42,0.30)",
   },
   orbNucleusScanning: {
-    backgroundColor: "rgba(108,99,255,0.5)",
+    backgroundColor: "rgba(232,112,42,0.55)",
   },
 
   setupHint: {
