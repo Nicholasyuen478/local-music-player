@@ -20,25 +20,28 @@ SplashScreen.preventAutoHideAsync();
 
 const queryClient = new QueryClient();
 
-function RootLayoutNav() {
-  useEffect(() => {
-    // RNTP fires trackplayer://notification.click when the media
-    // notification is tapped while the app is running (foreground / background).
-    // Cold-start taps are handled by +not-found.tsx via <Redirect>.
-    const handleUrl = ({ url }: { url: string }) => {
-      if (url.includes("notification.click")) {
-        // Defer one frame so the navigation container is settled
-        setTimeout(() => {
-          try {
-            router.replace("/(tabs)/");
-          } catch {
-            // already on player tab — ignore
-          }
-        }, 0);
-      }
-    };
+function goToPlayer() {
+  try { router.navigate("/(tabs)/"); } catch { /* already there */ }
+}
 
-    const sub = Linking.addEventListener("url", handleUrl);
+function RootLayoutNav() {
+  // Cold-start: app opened via notification deep link
+  useEffect(() => {
+    Linking.getInitialURL().then((url) => {
+      if (url && url.includes("notification.click")) {
+        // Give the navigation tree a moment to mount
+        setTimeout(goToPlayer, 400);
+      }
+    });
+  }, []);
+
+  // Foreground / background: RNTP fires the URL while app is running
+  useEffect(() => {
+    const sub = Linking.addEventListener("url", ({ url }) => {
+      if (url.includes("notification.click")) {
+        setTimeout(goToPlayer, 0);
+      }
+    });
     return () => sub.remove();
   }, []);
 

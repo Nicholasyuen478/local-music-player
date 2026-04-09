@@ -1,6 +1,6 @@
 import * as Haptics from "expo-haptics";
 import { Check, ChevronRight, Clock, ListMusic, Music2, Search, Users, X } from "lucide-react-native";
-import { router, useFocusEffect } from "expo-router";
+import { useFocusEffect } from "expo-router";
 import React, {
   useCallback,
   useMemo,
@@ -21,6 +21,9 @@ import { useMusicContext } from "@/context/MusicContext";
 import type { Song } from "@/context/MusicContext";
 import { useLayout } from "@/hooks/useLayout";
 import QueuePanel from "@/components/QueuePanel";
+
+// ─── Constants ────────────────────────────────────────────────────────────────
+const UNKNOWN_ARTIST = "Unknown Artist";
 
 // ─── Filter modes ────────────────────────────────────────────────────────────
 type FilterMode = "songs" | "artists" | "recent";
@@ -45,7 +48,6 @@ export default function LibraryScreen() {
   const [selectedIds,     setSelectedIds]     = useState<Set<string>>(new Set());
   const [selectMode,      setSelectMode]      = useState(false);
   const [searchText,      setSearchText]      = useState("");
-  const [searchActive,    setSearchActive]    = useState(false);
   const [showQueue,       setShowQueue]       = useState(false);
   const [expandedArtists, setExpandedArtists] = useState<Set<string>>(new Set());
 
@@ -73,7 +75,12 @@ export default function LibraryScreen() {
     const source = q
       ? songs.filter((s) => s.artist.toLowerCase().includes(q) || s.title.toLowerCase().includes(q))
       : songs;
+    // Sort A-Z, then by title within artist. Unknown Artist always goes last.
     const sorted = [...source].sort((a, b) => {
+      const aUnk = a.artist === UNKNOWN_ARTIST;
+      const bUnk = b.artist === UNKNOWN_ARTIST;
+      if (aUnk && !bUnk) return 1;
+      if (!aUnk && bUnk) return -1;
       const c = a.artist.localeCompare(b.artist, undefined, { sensitivity: "base" });
       return c !== 0 ? c : a.title.localeCompare(b.title, undefined, { sensitivity: "base" });
     });
@@ -121,10 +128,10 @@ export default function LibraryScreen() {
 
   // ── Header count string ─────────────────────────────────────────────────
   const headerCount = useMemo(() => {
+    const hasQuery = searchText.trim().length > 0;
     if (filterMode === "songs") {
-      const n = searchActive ? displayedSongs.length : songs.length;
-      return n > 0
-        ? searchActive && displayedSongs.length !== songs.length
+      return songs.length > 0
+        ? hasQuery && displayedSongs.length !== songs.length
           ? `${displayedSongs.length} / ${songs.length}`
           : `${songs.length} songs`
         : "";
@@ -137,7 +144,7 @@ export default function LibraryScreen() {
       return recentlyPlayed.length > 0 ? `${recentlyPlayed.length} recent` : "";
     }
     return "";
-  }, [filterMode, displayedSongs, songs, recentlyPlayed, artistSongsMap, searchActive]);
+  }, [filterMode, displayedSongs, songs, recentlyPlayed, artistSongsMap, searchText]);
 
   // ── Select mode ─────────────────────────────────────────────────────────
   const exitSelectMode = useCallback(() => {
@@ -211,14 +218,8 @@ export default function LibraryScreen() {
     [artistSongsMap],
   );
 
-  // ── Search ──────────────────────────────────────────────────────────────
-  const openSearch = useCallback(() => {
-    setSearchActive(true);
-    setTimeout(() => searchRef.current?.focus(), 80);
-  }, []);
-
-  const closeSearch = useCallback(() => {
-    setSearchActive(false);
+  // ── Search clear ────────────────────────────────────────────────────────
+  const clearSearch = useCallback(() => {
     setSearchText("");
     searchRef.current?.blur();
   }, []);
@@ -226,13 +227,13 @@ export default function LibraryScreen() {
   // ── Auto-scroll to current song (Songs mode only) ───────────────────────
   const scrollToCurrent = useCallback(() => {
     if (filterMode !== "songs") return;
-    if (selectMode || searchActive) return;
+    if (selectMode || searchText) return;
     if (!listRef.current || !isListReady.current || !currentSong) return;
     const idx = songs.findIndex((s) => s.id === currentSong.id);
     if (idx > 0) {
       listRef.current.scrollToIndex({ index: Math.max(0, idx - 2), animated: true });
     }
-  }, [songs, currentSong, filterMode, selectMode, searchActive]);
+  }, [songs, currentSong, filterMode, selectMode, searchText]);
 
   useFocusEffect(
     useCallback(() => {
@@ -358,25 +359,9 @@ export default function LibraryScreen() {
         ) : (
           <>
             <Text style={styles.headerCount}>{headerCount}</Text>
-            <View style={styles.headerActions}>
-              {/* Back to Player */}
-              <TouchableOpacity
-                onPress={() => router.navigate("/(tabs)/")}
-                style={styles.iconCircle}
-                hitSlop={8}
-              >
-                <Music2
-                  size={isCompact ? 15 : 16}
-                  color={currentSong ? Colors.dark.accent : Colors.dark.textSecondary}
-                />
-              </TouchableOpacity>
-              <TouchableOpacity onPress={openSearch} style={styles.iconCircle} hitSlop={8}>
-                <Search size={isCompact ? 15 : 16} color={Colors.dark.textSecondary} />
-              </TouchableOpacity>
-              <TouchableOpacity onPress={() => setShowQueue(true)} style={styles.iconCircle} hitSlop={8}>
-                <ListMusic size={isCompact ? 15 : 16} color={Colors.dark.textSecondary} />
-              </TouchableOpacity>
-            </View>
+            <TouchableOpacity onPress={() => setShowQueue(true)} style={styles.iconCircle} hitSlop={8}>
+              <ListMusic size={isCompact ? 15 : 16} color={Colors.dark.textSecondary} />
+            </TouchableOpacity>
           </>
         )}
       </View>
@@ -394,7 +379,6 @@ export default function LibraryScreen() {
                   Haptics.selectionAsync();
                   setFilterMode(mode);
                   setSearchText("");
-                  setSearchActive(false);
                   setExpandedArtists(new Set());
                 }}
                 activeOpacity={0.75}
@@ -411,8 +395,8 @@ export default function LibraryScreen() {
         </View>
       )}
 
-      {/* ── Search bar ── */}
-      {searchActive && !selectMode && (
+      {/* ── Search bar (always visible when not selecting) ── */}
+      {!selectMode && (
         <View style={[styles.searchRow, isCompact && styles.searchRowCompact]}>
           <Search size={14} color={Colors.dark.textTertiary} />
           <TextInput
@@ -425,9 +409,11 @@ export default function LibraryScreen() {
             autoCorrect={false}
             returnKeyType="search"
           />
-          <TouchableOpacity onPress={closeSearch} hitSlop={10}>
-            <X size={16} color={Colors.dark.textTertiary} />
-          </TouchableOpacity>
+          {searchText.length > 0 && (
+            <TouchableOpacity onPress={clearSearch} hitSlop={10}>
+              <X size={16} color={Colors.dark.textTertiary} />
+            </TouchableOpacity>
+          )}
         </View>
       )}
 

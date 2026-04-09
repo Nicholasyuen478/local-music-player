@@ -1,8 +1,8 @@
 import { Tabs } from "expo-router";
 import { BlurView } from "expo-blur";
-import { ImageIcon, Library } from "lucide-react-native";
+import { ImageIcon, Library, Music2 } from "lucide-react-native";
 import React from "react";
-import { Platform, StyleSheet, useWindowDimensions, View } from "react-native";
+import { Platform, Pressable, StyleSheet, useWindowDimensions, View } from "react-native";
 import Colors from "@/constants/colors";
 import { TAB_BAR_H_COMPACT, TAB_BAR_H_NORMAL } from "@/hooks/useLayout";
 
@@ -15,7 +15,7 @@ export default function TabLayout() {
 
   const tabBarBase = {
     position: "absolute" as const,
-    backgroundColor: isIOS ? "transparent" : "rgba(10,10,18,0.96)",
+    backgroundColor: isIOS ? "transparent" : "rgba(10,10,18,0.97)",
     borderTopWidth: StyleSheet.hairlineWidth,
     borderTopColor: Colors.dark.border,
     elevation: 0,
@@ -40,21 +40,12 @@ export default function TabLayout() {
           isIOS ? (
             <BlurView intensity={85} tint="dark" style={StyleSheet.absoluteFill} />
           ) : (
-            <View style={[StyleSheet.absoluteFill, { backgroundColor: "rgba(10,10,18,0.96)" }]} />
+            <View style={[StyleSheet.absoluteFill, { backgroundColor: "rgba(10,10,18,0.97)" }]} />
           ),
         tabBarIconStyle: { marginTop: isCompact ? 2 : 6 },
       }}
     >
-      {/* Player — immersive full-screen, NO tab bar, NOT shown in the tab row */}
-      <Tabs.Screen
-        name="index"
-        options={{
-          tabBarButton: () => null,
-          tabBarItemStyle: { display: "none", width: 0, overflow: "hidden" },
-          tabBarStyle: { display: "none" },
-        }}
-      />
-
+      {/* Library — left */}
       <Tabs.Screen
         name="library"
         options={{
@@ -64,6 +55,33 @@ export default function TabLayout() {
         }}
       />
 
+      {/* Player — centre hero button */}
+      <Tabs.Screen
+        name="index"
+        options={{
+          tabBarLabel: "",
+          tabBarItemStyle: styles.centreItem,
+          tabBarIconStyle: { marginTop: 0 },
+          tabBarStyle: tabBarBase,
+          tabBarButton: ({ onPress, onLongPress, accessibilityState }) => {
+            const active = accessibilityState?.selected ?? false;
+            return (
+              <Pressable
+                onPress={onPress}
+                onLongPress={onLongPress}
+                style={styles.centreBtn}
+                android_ripple={null}
+              >
+                <View style={[styles.centreBtnOrb, active && styles.centreBtnOrbActive]}>
+                  <Music2 size={isCompact ? 24 : 26} color="#fff" />
+                </View>
+              </Pressable>
+            );
+          },
+        }}
+      />
+
+      {/* Artwork — right */}
       <Tabs.Screen
         name="images"
         options={{
@@ -75,3 +93,38 @@ export default function TabLayout() {
     </Tabs>
   );
 }
+
+const styles = StyleSheet.create({
+  centreItem: {
+    flex: 1.2,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  centreBtn: {
+    flex: 1,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  centreBtnOrb: {
+    width: 54,
+    height: 54,
+    borderRadius: 27,
+    backgroundColor: "rgba(108,99,255,0.55)",
+    alignItems: "center",
+    justifyContent: "center",
+    borderWidth: 1.5,
+    borderColor: "rgba(108,99,255,0.5)",
+    shadowColor: Colors.dark.accent,
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.35,
+    shadowRadius: 10,
+    elevation: 6,
+  },
+  centreBtnOrbActive: {
+    backgroundColor: Colors.dark.accent,
+    borderColor: Colors.dark.accentLight,
+    shadowOpacity: 0.6,
+    shadowRadius: 16,
+    elevation: 10,
+  },
+});

@@ -1,7 +1,8 @@
 import * as Haptics from "expo-haptics";
 import {
-  ChevronDown,
+  ChevronUp,
   ImageIcon,
+  MicVocal,
   Pause,
   Play,
   ScanSearch,
@@ -16,6 +17,7 @@ import {
   Alert,
   Animated,
   Easing,
+  Modal,
   PanResponder,
   StyleSheet,
   Text,
@@ -26,14 +28,16 @@ import Colors from "@/constants/colors";
 import { useMusicContext } from "@/context/MusicContext";
 import { SongArtwork } from "@/components/SongArtwork";
 import { SeekBar } from "@/components/SeekBar";
+import { LyricsPanel } from "@/components/LyricsPanel";
 import { useLayout } from "@/hooks/useLayout";
 
 const SWIPE_THRESHOLD = 60;
 
 export default function PlayerScreen() {
-  const { width, height, isCompact, topInset, bottomInset, fontScale } = useLayout();
+  const { width, height, isCompact, topInset, bottomInset, tabBarH, fontScale } = useLayout();
 
-  const [isScanning, setIsScanning] = useState(false);
+  const [isScanning,  setIsScanning]  = useState(false);
+  const [lyricsOpen,  setLyricsOpen]  = useState(false);
 
   const {
     currentSong,
@@ -54,16 +58,15 @@ export default function PlayerScreen() {
     seekTo,
   } = useMusicContext();
 
-  // ── Immersive artwork size: no tab bar stealing space ──────────────────
-  // Target ~60% of screen height, capped by screen width so the square fits.
+  // ── Artwork size — accounts for tab bar + lyrics strip ─────────────────
   const playerArtSize = Math.min(
-    width - 44,                                      // 22 dp margins per side
-    Math.floor(height * (isCompact ? 0.46 : 0.56)), // soft vertical ceiling
-    340,                                             // absolute max
+    width - 44,
+    Math.floor(height * (isCompact ? 0.38 : 0.46)),
+    320,
   );
 
-  // Bottom padding: just safe-area + breathing room, no tab bar
-  const playerBottomPad = bottomInset + (isCompact ? 14 : 24);
+  // Bottom padding: safe-area + tab bar + breathing room
+  const playerBottomPad = bottomInset + tabBarH + (isCompact ? 8 : 12);
 
   // ── Setup-page animations ─────────────────────────────────────────────
   const ring1    = useRef(new Animated.Value(0)).current;
@@ -323,17 +326,22 @@ export default function PlayerScreen() {
   return (
     <View style={[styles.container, { paddingTop: topInset }]}>
 
-      {/* ── Top bar: chevron-down (→ Library) | scan + trash ── */}
-      <View style={[styles.topBar, isCompact && styles.topBarCompact]}>
-        <TouchableOpacity
-          onPress={() => router.navigate("/(tabs)/library")}
-          style={styles.utilBtn}
-          activeOpacity={0.6}
-          hitSlop={8}
-        >
-          <ChevronDown size={20} color={Colors.dark.textTertiary} />
-        </TouchableOpacity>
+      {/* ── Background accent glow ── */}
+      <View
+        pointerEvents="none"
+        style={[
+          styles.bgGlow,
+          {
+            top: topInset + (isCompact ? 40 : 60),
+            width: playerArtSize * 1.1,
+            height: playerArtSize * 1.1,
+            borderRadius: playerArtSize * 0.55,
+          },
+        ]}
+      />
 
+      {/* ── Top bar: scan + trash (right-aligned) ── */}
+      <View style={[styles.topBar, isCompact && styles.topBarCompact]}>
         <View style={styles.topRight}>
           <TouchableOpacity
             onPress={handleScan}
@@ -360,11 +368,6 @@ export default function PlayerScreen() {
 
       {/* ── Artwork — hero element ── */}
       <View style={styles.artOuter}>
-        {/*
-          overflow: 'hidden' is intentionally ABSENT from the Animated.View
-          so the image-edit button in the bottom-right corner isn't clipped.
-          SongArtwork handles its own internal clipping.
-        */}
         <Animated.View
           style={{
             width: playerArtSize,
@@ -374,9 +377,9 @@ export default function PlayerScreen() {
             borderRadius: 20,
             shadowColor: "#000",
             shadowOffset: { width: 0, height: 10 },
-            shadowOpacity: 0.4,
-            shadowRadius: 24,
-            elevation: 16,
+            shadowOpacity: 0.45,
+            shadowRadius: 28,
+            elevation: 18,
           }}
           {...panResponder.panHandlers}
         >
@@ -401,16 +404,10 @@ export default function PlayerScreen() {
       {/* ── Song info + shuffle ── */}
       <View style={[styles.infoRow, isCompact && styles.infoRowCompact]}>
         <View style={styles.infoText}>
-          <Text
-            style={[styles.songTitle, { fontSize: titleSize }]}
-            numberOfLines={1}
-          >
+          <Text style={[styles.songTitle, { fontSize: titleSize }]} numberOfLines={1}>
             {currentSong?.title ?? "—"}
           </Text>
-          <Text
-            style={[styles.songArtist, { fontSize: artistSize }]}
-            numberOfLines={1}
-          >
+          <Text style={[styles.songArtist, { fontSize: artistSize }]} numberOfLines={1}>
             {currentSong?.artist ?? `${songs.length} songs`}
           </Text>
         </View>
@@ -441,7 +438,7 @@ export default function PlayerScreen() {
       </View>
 
       {/* ── Playback controls ── */}
-      <View style={[styles.controls, { paddingBottom: playerBottomPad }]}>
+      <View style={styles.controls}>
         <TouchableOpacity onPress={handlePrev} style={styles.skipBtn} activeOpacity={0.65} hitSlop={8}>
           <SkipBack size={iconSize} color={Colors.dark.text} fill={Colors.dark.text} />
         </TouchableOpacity>
@@ -462,6 +459,62 @@ export default function PlayerScreen() {
           <SkipForward size={iconSize} color={Colors.dark.text} fill={Colors.dark.text} />
         </TouchableOpacity>
       </View>
+
+      {/* ── Lyrics strip ── */}
+      <TouchableOpacity
+        style={[styles.lyricsStrip, { marginBottom: playerBottomPad }]}
+        onPress={() => setLyricsOpen(true)}
+        activeOpacity={0.75}
+      >
+        <MicVocal size={12} color={Colors.dark.textTertiary} />
+        <Text style={styles.lyricsStripLabel}>LYRICS</Text>
+        <ChevronUp size={12} color={Colors.dark.textTertiary} />
+      </TouchableOpacity>
+
+      {/* ── Lyrics modal sheet ── */}
+      <Modal
+        visible={lyricsOpen}
+        animationType="slide"
+        presentationStyle="overFullScreen"
+        transparent
+        onRequestClose={() => setLyricsOpen(false)}
+      >
+        {/* Dimmed backdrop */}
+        <TouchableOpacity
+          style={styles.lyricsBackdrop}
+          activeOpacity={1}
+          onPress={() => setLyricsOpen(false)}
+        />
+
+        {/* Sheet */}
+        <View style={[styles.lyricsSheet, { height: height * 0.62, paddingBottom: bottomInset + tabBarH }]}>
+          {/* Drag handle */}
+          <View style={styles.lyricsHandle} />
+
+          {/* Header */}
+          <View style={styles.lyricsSheetHeader}>
+            <Text style={styles.lyricsSheetTitle}>Lyrics</Text>
+            <TouchableOpacity onPress={() => setLyricsOpen(false)} hitSlop={12}>
+              <Text style={styles.lyricsDoneBtn}>Done</Text>
+            </TouchableOpacity>
+          </View>
+
+          {currentSong ? (
+            <LyricsPanel
+              title={currentSong.title}
+              artist={currentSong.artist}
+              position={status.currentTime ?? 0}
+            />
+          ) : (
+            <View style={{ flex: 1, alignItems: "center", justifyContent: "center" }}>
+              <Text style={{ color: Colors.dark.textTertiary, fontFamily: "Inter_400Regular" }}>
+                No song playing
+              </Text>
+            </View>
+          )}
+        </View>
+      </Modal>
+
     </View>
   );
 }
@@ -469,29 +522,34 @@ export default function PlayerScreen() {
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: Colors.dark.background },
 
+  // ── Background glow ────────────────────────────────────────────────
+  bgGlow: {
+    position: "absolute",
+    alignSelf: "center",
+    backgroundColor: "rgba(108,99,255,0.07)",
+    shadowColor: Colors.dark.accent,
+    shadowOffset: { width: 0, height: 0 },
+    shadowOpacity: 0.25,
+    shadowRadius: 80,
+    elevation: 0,
+  },
+
   // ── Top bar ──────────────────────────────────────────────────────────
   topBar: {
     flexDirection: "row",
     alignItems: "center",
-    justifyContent: "space-between",
-    paddingHorizontal: 20,
-    paddingTop: 6,
-    paddingBottom: 4,
+    justifyContent: "flex-end",
+    paddingHorizontal: 16,
+    paddingTop: 4,
+    paddingBottom: 2,
   },
-  topBarCompact: { paddingTop: 2, paddingBottom: 2 },
-  topRight: { flexDirection: "row", alignItems: "center", gap: 4 },
+  topBarCompact: { paddingTop: 2, paddingBottom: 1 },
+  topRight: { flexDirection: "row", alignItems: "center", gap: 2 },
 
-  utilBtn: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    alignItems: "center",
-    justifyContent: "center",
-  },
   utilBtnSmall: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
+    width: 38,
+    height: 38,
+    borderRadius: 19,
     alignItems: "center",
     justifyContent: "center",
   },
@@ -569,7 +627,72 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
     paddingHorizontal: 24,
+    paddingBottom: 4,
     gap: 36,
+  },
+
+  // ── Lyrics strip (tap to open sheet) ─────────────────────────────────
+  lyricsStrip: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 6,
+    paddingVertical: 10,
+    marginHorizontal: 60,
+    marginTop: 4,
+    borderRadius: 20,
+    backgroundColor: Colors.dark.surface,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: Colors.dark.border,
+  },
+  lyricsStripLabel: {
+    color: Colors.dark.textTertiary,
+    fontSize: 11,
+    fontFamily: "Inter_600SemiBold",
+    letterSpacing: 1.2,
+  },
+
+  // ── Lyrics bottom sheet ───────────────────────────────────────────────
+  lyricsBackdrop: {
+    flex: 1,
+    backgroundColor: "rgba(0,0,0,0.55)",
+  },
+  lyricsSheet: {
+    backgroundColor: Colors.dark.backgroundSecondary,
+    borderTopLeftRadius: 24,
+    borderTopRightRadius: 24,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: Colors.dark.border,
+    overflow: "hidden",
+  },
+  lyricsHandle: {
+    width: 36,
+    height: 4,
+    borderRadius: 2,
+    backgroundColor: Colors.dark.border,
+    alignSelf: "center",
+    marginTop: 10,
+    marginBottom: 4,
+  },
+  lyricsSheetHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    paddingHorizontal: 24,
+    paddingVertical: 10,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: Colors.dark.border,
+  },
+  lyricsSheetTitle: {
+    color: Colors.dark.text,
+    fontSize: 15,
+    fontFamily: "Inter_700Bold",
+    letterSpacing: -0.2,
+  },
+  lyricsDoneBtn: {
+    color: Colors.dark.accent,
+    fontSize: 14,
+    fontFamily: "Inter_500Medium",
   },
   skipBtn: {
     width: 56,
