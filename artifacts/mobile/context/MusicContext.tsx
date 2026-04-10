@@ -799,6 +799,30 @@ const [MusicContextProvider, useMusicContext] = createContextHook(() => {
     saveArtworkMap();
   }, [currentSong, saveArtworkMap]);
 
+  // ── Assign a specific image to any song by its ID ────────────────────────
+  const assignArtworkToSong = useCallback((songId: string, imageUri: string) => {
+    artworkMap.current.set(songId, imageUri);
+    if (currentSong?.id === songId) {
+      setCurrentArtworkUri(imageUri);
+    }
+    saveArtworkMap();
+  }, [currentSong, saveArtworkMap]);
+
+  // ── Re-Roll artwork for any song by its ID ───────────────────────────────
+  const reRollArtworkForSong = useCallback((songId: string) => {
+    const pool = imagePoolRef.current;
+    if (!pool.length) return;
+    const current = artworkMap.current.get(songId) ?? null;
+    const candidates = pool.filter((u) => u !== current);
+    const from = candidates.length > 0 ? candidates : pool;
+    const picked = from[Math.floor(Math.random() * from.length)];
+    artworkMap.current.set(songId, picked);
+    if (currentSong?.id === songId) {
+      setCurrentArtworkUri(picked);
+    }
+    saveArtworkMap();
+  }, [currentSong, saveArtworkMap]);
+
   // ── Image pool management ─────────────────────────────────────────────────
 
   const addImagesToPool = useCallback(
@@ -904,6 +928,8 @@ const [MusicContextProvider, useMusicContext] = createContextHook(() => {
     toggleFavorite,
     reRollArtwork,
     assignArtwork,
+    assignArtworkToSong,
+    reRollArtworkForSong,
     addImagesToPool,
     removeImageFromPool,
     pickImageFolder,

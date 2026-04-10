@@ -31,7 +31,6 @@ import {
 } from "react-native";
 import Colors from "@/constants/colors";
 import { useMusicContext } from "@/context/MusicContext";
-import { ArtworkSheet } from "@/components/ArtworkSheet";
 import { SongArtwork } from "@/components/SongArtwork";
 import { SeekBar } from "@/components/SeekBar";
 import { LyricsPanel } from "@/components/LyricsPanel";
@@ -43,10 +42,9 @@ const SWIPE_THRESHOLD = 60;
 export default function PlayerScreen() {
   const { width, height, isCompact, topInset, bottomInset } = useLayout();
 
-  const [isScanning,      setIsScanning]      = useState(false);
-  const [lyricsOpen,      setLyricsOpen]      = useState(false);
-  const [dropdownOpen,    setDropdownOpen]    = useState(false);
-  const [artworkSheetOpen, setArtworkSheetOpen] = useState(false);
+  const [isScanning,   setIsScanning]   = useState(false);
+  const [lyricsOpen,   setLyricsOpen]   = useState(false);
+  const [dropdownOpen, setDropdownOpen] = useState(false);
 
   const {
     currentSong,
@@ -489,7 +487,10 @@ export default function PlayerScreen() {
             style={styles.artEditBtnWrap}
             onPress={() => {
               Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-              setArtworkSheetOpen(true);
+              router.push({
+                pathname: "/(tabs)/images",
+                params: { trackUri: currentSong?.uri ?? "" },
+              });
             }}
             activeOpacity={0.8}
             hitSlop={14}
@@ -630,12 +631,6 @@ export default function PlayerScreen() {
           )}
         </View>
       </Modal>
-
-      {/* ── Artwork quick-edit bottom sheet ── */}
-      <ArtworkSheet
-        visible={artworkSheetOpen}
-        onClose={() => setArtworkSheetOpen(false)}
-      />
 
     </View>
   );

@@ -1,7 +1,7 @@
 import * as Haptics from "expo-haptics";
 import { Image } from "expo-image";
-import { router, useFocusEffect } from "expo-router";
-import { ChevronLeft, ImageIcon, Plus, Scissors, X } from "lucide-react-native";
+import { router, useFocusEffect, useLocalSearchParams } from "expo-router";
+import { ChevronLeft, ImageIcon, Plus, Scissors, Shuffle, X } from "lucide-react-native";
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import {
   ActivityIndicator,
@@ -33,9 +33,6 @@ function isUserPickedUri(uri: string): boolean {
 }
 
 // ── Per-thumbnail component with retry logic ────────────────────────────────
-// expo-image can fire onError briefly when the app returns from background
-// while the image cache is warming up. We retry once after a short delay
-// before treating the failure as permanent.
 interface ThumbImgProps {
   uri: string;
   size: number;
@@ -44,10 +41,8 @@ interface ThumbImgProps {
 function ThumbImg({ uri, size }: ThumbImgProps) {
   const [failed, setFailed] = useState(false);
   const retryRef = useRef(0);
-  // imgKey lets us force a remount (re-fetch) for the retry
   const [imgKey, setImgKey] = useState(0);
 
-  // When the app returns to foreground, reset failure state so images retry.
   useEffect(() => {
     const sub = AppState.addEventListener("change", (nextState) => {
       if (nextState === "active" && failed) {
@@ -61,11 +56,9 @@ function ThumbImg({ uri, size }: ThumbImgProps) {
 
   const handleError = useCallback(() => {
     if (retryRef.current < 1) {
-      // First failure: wait 1.5 s then retry — avoids false positives on resume
       retryRef.current += 1;
       setTimeout(() => setImgKey((k) => k + 1), 1500);
     } else {
-      // Still failing after retry → show placeholder
       setFailed(true);
     }
   }, []);
@@ -96,8 +89,18 @@ function ThumbImg({ uri, size }: ThumbImgProps) {
 export default function ImagesScreen() {
   const { topInset, bottomInset, tabBarH, isCompact } = useLayout();
   const { width } = useWindowDimensions();
-  const { imagePool, pickImageFolder, removeImageFromPool, cropImageInPool } =
-    useMusicContext();
+  const {
+    imagePool,
+    pickImageFolder,
+    removeImageFromPool,
+    cropImageInPool,
+    assignArtworkToSong,
+    reRollArtworkForSong,
+  } = useMusicContext();
+
+  // Route param — set when navigated from the Player for a specific song
+  const { trackUri } = useLocalSearchParams<{ trackUri?: string }>();
+  const isSelectionMode = Boolean(trackUri);
 
   const thumbSize = Math.floor((width - GAP * (COLUMNS + 1)) / COLUMNS);
 
@@ -108,7 +111,7 @@ export default function ImagesScreen() {
   useFocusEffect(
     useCallback(() => {
       const sub = BackHandler.addEventListener("hardwareBackPress", () => {
-        router.navigate("/(tabs)");
+        router.back();
         return true;
       });
       return () => sub.remove();
@@ -118,7 +121,6 @@ export default function ImagesScreen() {
   const handlePickFiles = async () => {
     setIsAdding(true);
     try {
-      // pickImageFolder: copies to permanent storage then adds to pool
       const added = await pickImageFolder();
       if (added) Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
     } catch (e) { console.error("pick error", e); }
@@ -127,7 +129,7 @@ export default function ImagesScreen() {
 
   const handleRemove = (uri: string) => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-    Alert.alert("Remove image?", undefined, [
+    Alert.alert("Remove image?", "This will remove the image from your vault.", [
       { text: "Cancel", style: "cancel" },
       {
         text: "Remove",
@@ -164,20 +166,40 @@ export default function ImagesScreen() {
     }
   }, [cropImageInPool]);
 
+  // ── Selection-mode: tap image → assign to song → go back ─────────────────
+  const handleAssign = useCallback((imageUri: string) => {
+    if (!trackUri) return;
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+    assignArtworkToSong(trackUri, imageUri);
+    router.back();
+  }, [trackUri, assignArtworkToSong]);
+
+  // ── Randomize: pick random image → assign → go back ──────────────────────
+  const handleRandomize = useCallback(() => {
+    if (!trackUri || !imagePool.length) return;
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy);
+    reRollArtworkForSong(trackUri);
+    router.back();
+  }, [trackUri, imagePool.length, reRollArtworkForSong]);
+
   return (
     <View style={[styles.container, { paddingTop: topInset }]}>
 
-      {/* Header */}
+      {/* ── Header ── */}
       <View style={[styles.header, isCompact && styles.headerCompact]}>
         <TouchableOpacity
-          onPress={() => router.navigate("/(tabs)")}
+          onPress={() => router.back()}
           style={styles.iconCircle}
           hitSlop={10}
         >
           <ChevronLeft size={isCompact ? 18 : 20} color={Colors.dark.textSecondary} />
         </TouchableOpacity>
         <Text style={styles.headerCount}>
-          {imagePool.length > 0 ? `${imagePool.length} images` : "Artwork pool"}
+          {isSelectionMode
+            ? "Choose Artwork"
+            : imagePool.length > 0
+              ? `${imagePool.length} images`
+              : "Artwork vault"}
         </Text>
         <View style={styles.headerRight}>
           <TouchableOpacity
@@ -195,6 +217,20 @@ export default function ImagesScreen() {
         </View>
       </View>
 
+      {/* ── Randomize banner — shown only in selection mode ── */}
+      {isSelectionMode && imagePool.length > 0 && (
+        <TouchableOpacity
+          style={styles.randomizeBanner}
+          onPress={handleRandomize}
+          activeOpacity={0.82}
+        >
+          <View style={styles.randomizeDice}>
+            <Shuffle size={18} color={Colors.dark.accent} />
+          </View>
+          <Text style={styles.randomizeLabel}>Assign Random Artwork</Text>
+        </TouchableOpacity>
+      )}
+
       {imagePool.length === 0 ? (
         <View style={styles.emptyState}>
           <View style={styles.emptyIcon}>
@@ -211,19 +247,28 @@ export default function ImagesScreen() {
           showsVerticalScrollIndicator={false}
           contentContainerStyle={{
             paddingHorizontal: GAP,
-            paddingBottom: bottomInset + tabBarH + 88,   // leave room for FAB
+            paddingBottom: bottomInset + tabBarH + 88,
             gap: GAP,
           }}
           columnWrapperStyle={{ gap: GAP }}
           renderItem={({ item }) => {
             const isCropping = croppingUri === item;
-            const canCrop    = isUserPickedUri(item);
+            const canCrop    = isUserPickedUri(item) && !isSelectionMode;
 
             return (
-              <View style={[styles.thumb, { width: thumbSize, height: thumbSize }]}>
-
+              <TouchableOpacity
+                style={[styles.thumb, { width: thumbSize, height: thumbSize }]}
+                onPress={isSelectionMode ? () => handleAssign(item) : undefined}
+                activeOpacity={isSelectionMode ? 0.7 : 1}
+                disabled={!isSelectionMode}
+              >
                 {/* Image with per-item retry logic */}
                 <ThumbImg uri={item} size={thumbSize} />
+
+                {/* Selection-mode highlight overlay */}
+                {isSelectionMode && (
+                  <View style={styles.selectOverlay} />
+                )}
 
                 {/* Cropping spinner overlay */}
                 {isCropping && (
@@ -232,7 +277,7 @@ export default function ImagesScreen() {
                   </View>
                 )}
 
-                {/* Crop button — bottom-left */}
+                {/* Crop button — bottom-left (only in vault mode) */}
                 {canCrop && !isCropping && (
                   <TouchableOpacity
                     style={[styles.overlayBtn, styles.cropBtnPos]}
@@ -248,31 +293,36 @@ export default function ImagesScreen() {
                 {/* Remove button — top-right */}
                 <TouchableOpacity
                   style={[styles.overlayBtn, styles.removeBtnPos]}
-                  onPress={() => handleRemove(item)}
+                  onPress={(e) => {
+                    e.stopPropagation();
+                    handleRemove(item);
+                  }}
                   hitSlop={10}
                 >
                   <View style={styles.overlayBtnInner}>
                     <X size={11} color="#fff" />
                   </View>
                 </TouchableOpacity>
-              </View>
+              </TouchableOpacity>
             );
           }}
         />
       )}
 
-      {/* ── Floating Action Button ─────────────────────────────────────── */}
-      <TouchableOpacity
-        style={[styles.fab, { bottom: bottomInset + tabBarH + 20 }]}
-        onPress={handlePickFiles}
-        disabled={isAdding}
-        activeOpacity={0.82}
-      >
-        {isAdding
-          ? <ActivityIndicator size="small" color="#fff" />
-          : <Plus size={26} color="#fff" strokeWidth={2.5} />
-        }
-      </TouchableOpacity>
+      {/* ── Floating Action Button — only in vault mode ── */}
+      {!isSelectionMode && (
+        <TouchableOpacity
+          style={[styles.fab, { bottom: bottomInset + tabBarH + 20 }]}
+          onPress={handlePickFiles}
+          disabled={isAdding}
+          activeOpacity={0.82}
+        >
+          {isAdding
+            ? <ActivityIndicator size="small" color="#fff" />
+            : <Plus size={26} color="#fff" strokeWidth={2.5} />
+          }
+        </TouchableOpacity>
+      )}
 
     </View>
   );
@@ -316,6 +366,34 @@ const styles = StyleSheet.create({
   },
   addBtnLoading: { opacity: 0.55 },
 
+  // ── Randomize banner ──────────────────────────────────────────────────────
+  randomizeBanner: {
+    flexDirection: "row",
+    alignItems: "center",
+    marginHorizontal: 16,
+    marginBottom: 14,
+    paddingHorizontal: 18,
+    paddingVertical: 14,
+    borderRadius: 14,
+    backgroundColor: Colors.dark.surface,
+    borderWidth: 1,
+    borderColor: Colors.dark.accentDim,
+    gap: 14,
+  },
+  randomizeDice: {
+    width: 38,
+    height: 38,
+    borderRadius: 12,
+    backgroundColor: Colors.dark.accentDim,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  randomizeLabel: {
+    color: "#fff",
+    fontSize: 15,
+    fontFamily: "Inter_600SemiBold",
+  },
+
   thumb: {
     borderRadius: 10,
     overflow: "hidden",
@@ -323,6 +401,11 @@ const styles = StyleSheet.create({
     position: "relative",
   },
   thumbImg: { width: "100%", height: "100%" },
+
+  selectOverlay: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: "rgba(255,140,0,0.08)",
+  },
 
   failedThumb: {
     backgroundColor: Colors.dark.surfaceSecondary,
@@ -383,7 +466,6 @@ const styles = StyleSheet.create({
     textAlign: "center",
   },
 
-  // ── Floating action button ─────────────────────────────────────────────
   fab: {
     position: "absolute",
     right: 24,
