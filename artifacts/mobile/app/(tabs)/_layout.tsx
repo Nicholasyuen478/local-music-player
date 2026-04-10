@@ -72,7 +72,7 @@ export default function TabLayout() {
                 android_ripple={null}
               >
                 <View style={styles.centreBtnOrb}>
-                  <Music size={28} color="#fff" fill="#fff" />
+                  <Music size={26} color="#fff" strokeWidth={2} />
                 </View>
               </Pressable>
             );

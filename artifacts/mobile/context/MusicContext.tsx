@@ -78,6 +78,7 @@ const STORAGE_KEYS = {
   CURRENT_INDEX: "current_index",
   SHUFFLE: "shuffle_enabled",
   RECENTLY_PLAYED: "recently_played",
+  FAVORITES: "favorites_v1",
 };
 
 const AUDIO_EXTENSIONS = new Set([
@@ -258,6 +259,7 @@ const [MusicContextProvider, useMusicContext] = createContextHook(() => {
   const [hasCustomImages, setHasCustomImages] = useState(false);
   const [isPlayerReady, setIsPlayerReady] = useState(false);
   const [recentlyPlayed, setRecentlyPlayed] = useState<Song[]>([]);
+  const [favorites, setFavorites] = useState<string[]>([]);    // array of song URIs
 
   // ── Artwork tracking ──────────────────────────────────────────────────────
   const [currentArtworkUri, setCurrentArtworkUri] = useState<string | null>(null);
@@ -378,7 +380,7 @@ const [MusicContextProvider, useMusicContext] = createContextHook(() => {
     try {
       const [
         cachedSongs, pool, customFlag, imgFolder,
-        savedQueue, savedIndex, savedShuffle,
+        savedQueue, savedIndex, savedShuffle, favRaw,
       ] = await Promise.all([
         AsyncStorage.getItem(STORAGE_KEYS.SONGS),
         AsyncStorage.getItem(STORAGE_KEYS.IMAGE_POOL),
@@ -387,7 +389,12 @@ const [MusicContextProvider, useMusicContext] = createContextHook(() => {
         AsyncStorage.getItem(STORAGE_KEYS.QUEUE),
         AsyncStorage.getItem(STORAGE_KEYS.CURRENT_INDEX),
         AsyncStorage.getItem(STORAGE_KEYS.SHUFFLE),
+        AsyncStorage.getItem(STORAGE_KEYS.FAVORITES),
       ]);
+
+      if (favRaw) {
+        try { setFavorites(JSON.parse(favRaw) as string[]); } catch {}
+      }
 
       if (imgFolder) setImageFolderUri(imgFolder);
       // Shuffle is intentionally NOT restored on restart — always boot in
@@ -655,6 +662,17 @@ const [MusicContextProvider, useMusicContext] = createContextHook(() => {
     await TrackPlayer.seekTo(secs);
   }, []);
 
+  // ── Favorites management ──────────────────────────────────────────────────
+  const toggleFavorite = useCallback(async (uri: string) => {
+    setFavorites((prev) => {
+      const next = prev.includes(uri)
+        ? prev.filter((u) => u !== uri)
+        : [...prev, uri];
+      AsyncStorage.setItem(STORAGE_KEYS.FAVORITES, JSON.stringify(next)).catch(() => {});
+      return next;
+    });
+  }, []);
+
   // ── Image pool management ─────────────────────────────────────────────────
 
   const addImagesToPool = useCallback(
@@ -740,6 +758,7 @@ const [MusicContextProvider, useMusicContext] = createContextHook(() => {
     currentArtworkUri,
     shuffleEnabled,
     recentlyPlayed,
+    favorites,
     isLoading,
     isSetupDone,
     imagePool,
@@ -755,6 +774,7 @@ const [MusicContextProvider, useMusicContext] = createContextHook(() => {
     playNext,
     playPrev,
     toggleShuffle,
+    toggleFavorite,
     addImagesToPool,
     removeImageFromPool,
     pickImageFolder,

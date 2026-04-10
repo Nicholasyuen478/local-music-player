@@ -4,6 +4,7 @@ import { Image } from "expo-image";
 import {
   ChevronDown,
   ChevronUp,
+  Heart,
   ImageIcon,
   MicVocal,
   MoreVertical,
@@ -50,6 +51,7 @@ export default function PlayerScreen() {
     currentArtworkUri,
     songs,
     shuffleEnabled,
+    favorites,
     status,
     isLoading,
     isSetupDone,
@@ -61,8 +63,17 @@ export default function PlayerScreen() {
     playNext,
     playPrev,
     toggleShuffle,
+    toggleFavorite,
     seekTo,
   } = useMusicContext();
+
+  const isFavorite = currentSong ? favorites.includes(currentSong.uri) : false;
+
+  const handleToggleFavorite = useCallback(() => {
+    if (!currentSong) return;
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    toggleFavorite(currentSong.uri);
+  }, [currentSong, toggleFavorite]);
 
   // ── Native ID3 metadata (from react-native-track-player) ──────────────
   // Overrides the filename-parsed title/artist when the native player
@@ -479,7 +490,7 @@ export default function PlayerScreen() {
         </Animated.View>
       </View>
 
-      {/* ── Song info + shuffle ── */}
+      {/* ── Song info + heart + shuffle ── */}
       <View style={[styles.infoRow, isCompact && styles.infoRowCompact]}>
         <View style={styles.infoText}>
           <Text style={[styles.songTitle, isCompact && styles.songTitleCompact]} numberOfLines={1}>
@@ -489,6 +500,21 @@ export default function PlayerScreen() {
             {displayArtist || `${songs.length} songs`}
           </Text>
         </View>
+
+        {/* Heart / favourite button */}
+        <TouchableOpacity
+          onPress={handleToggleFavorite}
+          style={styles.heartBtn}
+          activeOpacity={0.7}
+          hitSlop={10}
+        >
+          <Heart
+            size={isCompact ? 20 : 22}
+            color={isFavorite ? Colors.dark.accent : "rgba(255,255,255,0.45)"}
+            fill={isFavorite ? Colors.dark.accent : "none"}
+            strokeWidth={isFavorite ? 0 : 1.8}
+          />
+        </TouchableOpacity>
 
         <View style={styles.shuffleWrap}>
           <TouchableOpacity
@@ -713,6 +739,7 @@ const styles = StyleSheet.create({
   },
   songArtistCompact: { fontSize: 14, marginTop: 3 },
 
+  heartBtn: { padding: 6, alignItems: "center", justifyContent: "center" },
   shuffleWrap: { alignItems: "center" },
   shuffleBtn: {
     width: 42,

@@ -1,5 +1,5 @@
 import * as Haptics from "expo-haptics";
-import { Check, ChevronLeft, ChevronRight, Clock, ListMusic, Music2, Search, Users, X } from "lucide-react-native";
+import { Check, ChevronLeft, Clock, Heart, ListMusic, Music2, Search, X } from "lucide-react-native";
 import { router, useFocusEffect } from "expo-router";
 import React, {
   useCallback,
@@ -23,16 +23,20 @@ import type { Song } from "@/context/MusicContext";
 import { useLayout } from "@/hooks/useLayout";
 import QueuePanel from "@/components/QueuePanel";
 
-// ─── Constants ────────────────────────────────────────────────────────────────
-const UNKNOWN_ARTIST = "Unknown Artist";
+// ─── Filter modes ─────────────────────────────────────────────────────────────
+type FilterMode = "liked" | "recent" | "songs";
 
-// ─── Filter modes ────────────────────────────────────────────────────────────
-type FilterMode = "songs" | "artists" | "recent";
+// ─── Helpers ─────────────────────────────────────────────────────────────────
+function stripExtension(filename: string): string {
+  return filename.replace(/\.[^/.]+$/, "");
+}
 
-// ─── Row types (flat array driving the FlatList) ──────────────────────────────
-type SectionRow = { kind: "section"; artist: string; key: string };
-type SongRow    = { kind: "song";    data: Song;    key: string };
-type ListRow    = SectionRow | SongRow;
+function formatDuration(secs?: number): string {
+  if (!secs || !isFinite(secs) || secs <= 0) return "";
+  const m = Math.floor(secs / 60);
+  const s = Math.floor(secs % 60);
+  return `${m}:${s.toString().padStart(2, "0")}`;
+}
 
 export default function LibraryScreen() {
   const { topInset, bottomInset, tabBarH, isCompact } = useLayout();
@@ -41,16 +45,16 @@ export default function LibraryScreen() {
     currentSong,
     isSetupDone,
     recentlyPlayed,
+    favorites,
     playSongFromLibrary,
     removeSongs,
   } = useMusicContext();
 
-  const [filterMode,      setFilterMode]      = useState<FilterMode>("songs");
-  const [selectedIds,     setSelectedIds]     = useState<Set<string>>(new Set());
-  const [selectMode,      setSelectMode]      = useState(false);
-  const [searchText,      setSearchText]      = useState("");
-  const [showQueue,       setShowQueue]       = useState(false);
-  const [expandedArtists, setExpandedArtists] = useState<Set<string>>(new Set());
+  const [filterMode,  setFilterMode]  = useState<FilterMode>("songs");
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [selectMode,  setSelectMode]  = useState(false);
+  const [searchText,  setSearchText]  = useState("");
+  const [showQueue,   setShowQueue]   = useState(false);
 
   const listRef     = useRef<FlatList>(null);
   const isListReady = useRef(false);
@@ -58,7 +62,7 @@ export default function LibraryScreen() {
 
   const itemH = isCompact ? 62 : 72;
 
-  // ── Hardware back → return to Player instead of exiting app ────────────
+  // ── Hardware back → return to Player ───────────────────────────────────
   useFocusEffect(
     useCallback(() => {
       const sub = BackHandler.addEventListener("hardwareBackPress", () => {
@@ -69,94 +73,37 @@ export default function LibraryScreen() {
     }, []),
   );
 
-  // ── Filtered songs (search applied) ────────────────────────────────────
-  const displayedSongs = useMemo(() => {
+  // ── Base list for each filter mode ─────────────────────────────────────
+  const favSet = useMemo(() => new Set(favorites), [favorites]);
+
+  const baseList = useMemo<Song[]>(() => {
+    if (filterMode === "liked") {
+      return songs.filter((s) => favSet.has(s.uri));
+    }
+    if (filterMode === "recent") {
+      return recentlyPlayed;
+    }
+    return songs;
+  }, [filterMode, songs, recentlyPlayed, favSet]);
+
+  // ── Search filter ───────────────────────────────────────────────────────
+  const displayedSongs = useMemo<Song[]>(() => {
     const q = searchText.trim().toLowerCase();
-    if (!q) return songs;
-    return songs.filter(
-      (s) =>
-        s.title.toLowerCase().includes(q) ||
-        s.artist.toLowerCase().includes(q),
+    if (!q) return baseList;
+    return baseList.filter((s) =>
+      stripExtension(s.filename).toLowerCase().includes(q),
     );
-  }, [songs, searchText]);
+  }, [baseList, searchText]);
 
-  // ── Artist → songs map (search-filtered, used in Artists mode) ─────────
-  const artistSongsMap = useMemo<Map<string, Song[]>>(() => {
-    if (filterMode !== "artists") return new Map();
-    const q = searchText.trim().toLowerCase();
-    const source = q
-      ? songs.filter((s) => s.artist.toLowerCase().includes(q) || s.title.toLowerCase().includes(q))
-      : songs;
-    // Sort A-Z, then by title within artist. Unknown Artist always goes last.
-    const sorted = [...source].sort((a, b) => {
-      const aUnk = a.artist === UNKNOWN_ARTIST;
-      const bUnk = b.artist === UNKNOWN_ARTIST;
-      if (aUnk && !bUnk) return 1;
-      if (!aUnk && bUnk) return -1;
-      const c = a.artist.localeCompare(b.artist, undefined, { sensitivity: "base" });
-      return c !== 0 ? c : a.title.localeCompare(b.title, undefined, { sensitivity: "base" });
-    });
-    const map = new Map<string, Song[]>();
-    for (const song of sorted) {
-      if (!map.has(song.artist)) map.set(song.artist, []);
-      map.get(song.artist)!.push(song);
-    }
-    return map;
-  }, [filterMode, songs, searchText]);
-
-  // ── List rows based on current filter mode ──────────────────────────────
-  const listRows = useMemo<ListRow[]>(() => {
-    if (filterMode === "songs") {
-      return displayedSongs.map((s) => ({ kind: "song", data: s, key: s.id }));
-    }
-
-    if (filterMode === "artists") {
-      const rows: ListRow[] = [];
-      for (const [artist, artistSongs] of artistSongsMap) {
-        rows.push({ kind: "section", artist, key: `hdr-${artist}` });
-        if (expandedArtists.has(artist)) {
-          for (const song of artistSongs) {
-            rows.push({ kind: "song", data: song, key: song.id });
-          }
-        }
-      }
-      return rows;
-    }
-
-    if (filterMode === "recent") {
-      const q = searchText.trim().toLowerCase();
-      const filtered = q
-        ? recentlyPlayed.filter(
-            (s) =>
-              s.title.toLowerCase().includes(q) ||
-              s.artist.toLowerCase().includes(q),
-          )
-        : recentlyPlayed;
-      return filtered.map((s) => ({ kind: "song", data: s, key: `recent-${s.id}` }));
-    }
-
-    return [];
-  }, [filterMode, displayedSongs, artistSongsMap, expandedArtists, recentlyPlayed, searchText]);
-
-  // ── Header count string ─────────────────────────────────────────────────
+  // ── Header count ────────────────────────────────────────────────────────
   const headerCount = useMemo(() => {
-    const hasQuery = searchText.trim().length > 0;
-    if (filterMode === "songs") {
-      return songs.length > 0
-        ? hasQuery && displayedSongs.length !== songs.length
-          ? `${displayedSongs.length} / ${songs.length}`
-          : `${songs.length} songs`
-        : "";
-    }
-    if (filterMode === "artists") {
-      const n = artistSongsMap.size;
-      return n > 0 ? `${n} artist${n !== 1 ? "s" : ""}` : "";
-    }
-    if (filterMode === "recent") {
-      return recentlyPlayed.length > 0 ? `${recentlyPlayed.length} recent` : "";
-    }
-    return "";
-  }, [filterMode, displayedSongs, songs, recentlyPlayed, artistSongsMap, searchText]);
+    const n = displayedSongs.length;
+    if (filterMode === "liked")  return n > 0 ? `${n} liked` : "";
+    if (filterMode === "recent") return n > 0 ? `${n} recent` : "";
+    const total = songs.length;
+    if (!total) return "";
+    return n < total && searchText.trim() ? `${n} / ${total}` : `${total} songs`;
+  }, [filterMode, displayedSongs.length, songs.length, searchText]);
 
   // ── Select mode ─────────────────────────────────────────────────────────
   const exitSelectMode = useCallback(() => {
@@ -202,34 +149,6 @@ export default function LibraryScreen() {
     ]);
   }, [selectedIds, removeSongs, exitSelectMode]);
 
-  // ── Artist group expand / select-all ────────────────────────────────────
-  const toggleArtist = useCallback((artist: string) => {
-    Haptics.selectionAsync();
-    setExpandedArtists((prev) => {
-      const next = new Set(prev);
-      if (next.has(artist)) next.delete(artist);
-      else next.add(artist);
-      return next;
-    });
-  }, []);
-
-  const handleArtistGroupLongPress = useCallback(
-    (artist: string) => {
-      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-      const artistSongs = artistSongsMap.get(artist) ?? [];
-      if (artistSongs.length === 0) return;
-      // Expand so the user can see the highlighted songs
-      setExpandedArtists((prev) => {
-        const next = new Set(prev);
-        next.add(artist);
-        return next;
-      });
-      setSelectMode(true);
-      setSelectedIds(new Set(artistSongs.map((s) => s.id)));
-    },
-    [artistSongsMap],
-  );
-
   // ── Search clear ────────────────────────────────────────────────────────
   const clearSearch = useCallback(() => {
     setSearchText("");
@@ -254,15 +173,16 @@ export default function LibraryScreen() {
     }, [scrollToCurrent]),
   );
 
-  // ── Row renderers ───────────────────────────────────────────────────────
-  const renderSongRow = useCallback(
-    (item: Song, customKey?: string) => {
+  // ── Row renderer ────────────────────────────────────────────────────────
+  const renderItem = useCallback(
+    ({ item }: { item: Song }) => {
       const isActive   = item.id === currentSong?.id;
       const isSelected = selectedIds.has(item.id);
+      const cleanName  = stripExtension(item.filename);
+      const duration   = formatDuration(item.duration);
 
       return (
         <TouchableOpacity
-          key={customKey ?? item.id}
           style={[
             styles.row,
             { height: itemH },
@@ -279,82 +199,52 @@ export default function LibraryScreen() {
               {isSelected && <Check size={11} color="#000" strokeWidth={3} />}
             </View>
           )}
+
           <View style={styles.rowText}>
             <Text
-              style={[
-                styles.title,
-                isActive && !selectMode && styles.titleActive,
-                isCompact && styles.titleCompact,
-              ]}
+              style={[styles.fileName, isActive && !selectMode && styles.fileNameActive]}
               numberOfLines={1}
+              ellipsizeMode="tail"
             >
-              {item.title}
+              {cleanName}
             </Text>
-            <Text
-              style={[styles.artist, isCompact && styles.artistCompact]}
-              numberOfLines={1}
-            >
-              {item.artist}
-            </Text>
+            {duration ? (
+              <Text style={styles.duration} numberOfLines={1}>
+                {duration}
+              </Text>
+            ) : null}
           </View>
+
           {isActive && !selectMode && <View style={styles.activeBar} />}
         </TouchableOpacity>
       );
     },
-    [currentSong, selectedIds, selectMode, handlePress, handleLongPress, itemH, isCompact],
+    [currentSong, selectedIds, selectMode, handlePress, handleLongPress, itemH],
   );
 
-  const renderRow = useCallback(
-    ({ item }: { item: ListRow }) => {
-      if (item.kind === "section") {
-        const isExpanded  = expandedArtists.has(item.artist);
-        const groupSongs  = artistSongsMap.get(item.artist) ?? [];
-        const count       = groupSongs.length;
-        const allSelected = selectMode && count > 0 && groupSongs.every((s) => selectedIds.has(s.id));
-
-        return (
-          <TouchableOpacity
-            style={[
-              styles.sectionHeader,
-              allSelected && styles.sectionHeaderSelected,
-            ]}
-            onPress={() => toggleArtist(item.artist)}
-            onLongPress={() => handleArtistGroupLongPress(item.artist)}
-            delayLongPress={350}
-            activeOpacity={0.7}
-          >
-            <View style={styles.sectionContent}>
-              <Text style={[styles.sectionText, isCompact && styles.sectionTextCompact]} numberOfLines={1}>
-                {item.artist}
-              </Text>
-              <Text style={styles.sectionCount}>{count}</Text>
-            </View>
-            <View style={{ transform: [{ rotate: isExpanded ? "90deg" : "0deg" }] }}>
-              <ChevronRight size={15} color={Colors.dark.accent} />
-            </View>
-          </TouchableOpacity>
-        );
-      }
-      return renderSongRow(item.data, item.key);
-    },
-    [
-      renderSongRow, isCompact,
-      expandedArtists, artistSongsMap, selectMode, selectedIds,
-      toggleArtist, handleArtistGroupLongPress,
-    ],
+  const getItemLayout = useCallback(
+    (_: unknown, index: number) => ({ length: itemH, offset: itemH * index, index }),
+    [itemH],
   );
-
-  // getItemLayout only for uniform-height modes
-  const getItemLayout = useMemo(() => {
-    if (filterMode === "artists") return undefined;
-    return (_: unknown, index: number) => ({
-      length: itemH,
-      offset: itemH * index,
-      index,
-    });
-  }, [filterMode, itemH]);
 
   const listBottomPad = bottomInset + tabBarH + 16 + (selectMode ? 72 : 0);
+
+  // ── Empty state copy ────────────────────────────────────────────────────
+  const emptyState = useMemo(() => {
+    if (!isSetupDone || songs.length === 0) {
+      return { icon: <Music2 size={32} color={Colors.dark.accent} />, title: "No songs loaded", hint: "Scan your device from the Player tab" };
+    }
+    if (filterMode === "liked" && displayedSongs.length === 0 && !searchText.trim()) {
+      return { icon: <Heart size={32} color={Colors.dark.accent} />, title: "No liked songs yet", hint: "Tap the ♥ on the player to save favourites" };
+    }
+    if (filterMode === "recent" && displayedSongs.length === 0 && !searchText.trim()) {
+      return { icon: <Clock size={32} color={Colors.dark.accent} />, title: "No recent plays", hint: "Songs appear here after you play them" };
+    }
+    if (displayedSongs.length === 0) {
+      return { icon: <Search size={32} color={Colors.dark.textTertiary} />, title: "No results", hint: `"${searchText}"` };
+    }
+    return null;
+  }, [isSetupDone, songs.length, filterMode, displayedSongs.length, searchText]);
 
   return (
     <View style={[styles.container, { paddingTop: topInset }]}>
@@ -385,10 +275,10 @@ export default function LibraryScreen() {
         )}
       </View>
 
-      {/* ── Filter pills ── */}
+      {/* ── Filter pills: Liked · Recent · Songs ── */}
       {!selectMode && (
         <View style={[styles.filterBar, isCompact && styles.filterBarCompact]}>
-          {(["recent", "songs", "artists"] as FilterMode[]).map((mode) => {
+          {(["liked", "recent", "songs"] as FilterMode[]).map((mode) => {
             const active = filterMode === mode;
             return (
               <TouchableOpacity
@@ -398,19 +288,17 @@ export default function LibraryScreen() {
                   Haptics.selectionAsync();
                   setFilterMode(mode);
                   setSearchText("");
-                  setExpandedArtists(new Set());
-                  // Reset scroll to top when switching to any filter
                   setTimeout(() => {
                     listRef.current?.scrollToOffset({ offset: 0, animated: false });
                   }, 0);
                 }}
                 activeOpacity={0.75}
               >
-                {mode === "songs"   && <Music2 size={12} color={active ? Colors.dark.accent : Colors.dark.textTertiary} />}
-                {mode === "artists" && <Users  size={12} color={active ? Colors.dark.accent : Colors.dark.textTertiary} />}
-                {mode === "recent"  && <Clock  size={12} color={active ? Colors.dark.accent : Colors.dark.textTertiary} />}
+                {mode === "liked"  && <Heart  size={12} color={active ? Colors.dark.accent : Colors.dark.textTertiary} fill={active ? Colors.dark.accent : "none"} />}
+                {mode === "recent" && <Clock  size={12} color={active ? Colors.dark.accent : Colors.dark.textTertiary} />}
+                {mode === "songs"  && <Music2 size={12} color={active ? Colors.dark.accent : Colors.dark.textTertiary} />}
                 <Text style={[styles.filterText, active && styles.filterTextActive]}>
-                  {mode === "songs" ? "Songs" : mode === "artists" ? "Artists" : "Recent"}
+                  {mode === "liked" ? "Liked" : mode === "recent" ? "Recent" : "Songs"}
                 </Text>
               </TouchableOpacity>
             );
@@ -418,14 +306,14 @@ export default function LibraryScreen() {
         </View>
       )}
 
-      {/* ── Search bar (always visible when not selecting) ── */}
+      {/* ── Search bar ── */}
       {!selectMode && (
         <View style={[styles.searchRow, isCompact && styles.searchRowCompact]}>
           <Search size={14} color={Colors.dark.textTertiary} />
           <TextInput
             ref={searchRef}
             style={[styles.searchInput, isCompact && styles.searchInputCompact]}
-            placeholder={filterMode === "artists" ? "Search artist or title…" : "Title or artist…"}
+            placeholder="Search by filename…"
             placeholderTextColor={Colors.dark.textTertiary}
             value={searchText}
             onChangeText={setSearchText}
@@ -441,34 +329,18 @@ export default function LibraryScreen() {
       )}
 
       {/* ── Content ── */}
-      {!isSetupDone || songs.length === 0 ? (
+      {emptyState ? (
         <View style={styles.empty}>
-          <View style={styles.emptyIcon}>
-            <Music2 size={32} color={Colors.dark.accent} />
-          </View>
-          <Text style={styles.emptyText}>No songs loaded</Text>
-          <Text style={styles.emptyHint}>Scan your device from the Player tab</Text>
-        </View>
-      ) : filterMode === "recent" && recentlyPlayed.length === 0 ? (
-        <View style={styles.empty}>
-          <View style={styles.emptyIcon}>
-            <Clock size={32} color={Colors.dark.accent} />
-          </View>
-          <Text style={styles.emptyText}>No recent plays</Text>
-          <Text style={styles.emptyHint}>Songs appear here after you play them</Text>
-        </View>
-      ) : listRows.length === 0 ? (
-        <View style={styles.empty}>
-          <Search size={32} color={Colors.dark.textTertiary} />
-          <Text style={styles.emptyText}>No results</Text>
-          <Text style={styles.emptyHint}>"{searchText}"</Text>
+          <View style={styles.emptyIcon}>{emptyState.icon}</View>
+          <Text style={styles.emptyText}>{emptyState.title}</Text>
+          <Text style={styles.emptyHint}>{emptyState.hint}</Text>
         </View>
       ) : (
         <FlatList
           ref={listRef}
-          data={listRows}
-          keyExtractor={(item) => item.key}
-          renderItem={renderRow}
+          data={displayedSongs}
+          keyExtractor={(item) => item.id}
+          renderItem={renderItem}
           contentContainerStyle={{ paddingBottom: listBottomPad }}
           showsVerticalScrollIndicator={false}
           getItemLayout={getItemLayout}
@@ -490,12 +362,7 @@ export default function LibraryScreen() {
 
       {/* ── Select mode action bar ── */}
       {selectMode && (
-        <View
-          style={[
-            styles.actionBar,
-            { bottom: tabBarH, paddingBottom: bottomInset + 8 },
-          ]}
-        >
+        <View style={[styles.actionBar, { bottom: tabBarH, paddingBottom: bottomInset + 8 }]}>
           <TouchableOpacity
             style={[styles.removeBtn, selectedIds.size === 0 && styles.removeBtnDisabled]}
             onPress={handleRemove}
@@ -535,7 +402,6 @@ const styles = StyleSheet.create({
     letterSpacing: 0.5,
     textTransform: "uppercase",
   },
-  headerActions: { flexDirection: "row", alignItems: "center", gap: 6 },
   headerBtn: { padding: 6 },
   cancelText: {
     color: Colors.dark.textSecondary,
@@ -605,54 +471,21 @@ const styles = StyleSheet.create({
   },
   searchInputCompact: { fontSize: 13 },
 
-  // ── Artist section headers (collapsible groups) ────────────────────────
-  sectionHeader: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
-    paddingHorizontal: 20,
-    paddingVertical: 8,
-    backgroundColor: Colors.dark.background,
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: Colors.dark.border,
-  },
-  sectionHeaderSelected: {
-    backgroundColor: Colors.dark.accentDim,
-  },
-  sectionContent: {
-    flex: 1,
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 8,
-    marginRight: 8,
-  },
-  sectionText: {
-    color: Colors.dark.accent,
-    fontSize: 12,
-    fontFamily: "Inter_700Bold",
-    letterSpacing: 0.8,
-    textTransform: "uppercase",
-    flexShrink: 1,
-  },
-  sectionTextCompact: { fontSize: 11 },
-  sectionCount: {
-    color: Colors.dark.textTertiary,
-    fontSize: 11,
-    fontFamily: "Inter_400Regular",
-  },
-
   // ── Song rows ─────────────────────────────────────────────────────────
   row: {
     flexDirection: "row",
     alignItems: "center",
     paddingHorizontal: 20,
-    gap: 14,
+    gap: 12,
     borderBottomWidth: StyleSheet.hairlineWidth,
     borderBottomColor: Colors.dark.border,
   },
-  rowActive:   { backgroundColor: "rgba(232,112,42,0.07)" },
-  rowSelected: { backgroundColor: "rgba(232,112,42,0.12)" },
-
+  rowActive: {
+    backgroundColor: "rgba(232,112,42,0.07)",
+  },
+  rowSelected: {
+    backgroundColor: "rgba(255,255,255,0.06)",
+  },
   checkbox: {
     width: 22,
     height: 22,
@@ -661,28 +494,31 @@ const styles = StyleSheet.create({
     borderColor: Colors.dark.textTertiary,
     alignItems: "center",
     justifyContent: "center",
-    flexShrink: 0,
   },
   checkboxSelected: {
     backgroundColor: Colors.dark.accent,
     borderColor: Colors.dark.accent,
   },
-
-  rowText: { flex: 1 },
-  title: {
+  rowText: {
+    flex: 1,
+    justifyContent: "center",
+    gap: 3,
+  },
+  fileName: {
     color: Colors.dark.text,
     fontSize: 15,
     fontFamily: "Inter_500Medium",
+    letterSpacing: 0.1,
   },
-  titleCompact: { fontSize: 14 },
-  titleActive:  { color: Colors.dark.accent, fontFamily: "Inter_600SemiBold" },
-  artist: {
-    color: Colors.dark.textSecondary,
+  fileNameActive: {
+    color: Colors.dark.accent,
+  },
+  duration: {
+    color: Colors.dark.textTertiary,
     fontSize: 12,
     fontFamily: "Inter_400Regular",
-    marginTop: 3,
+    letterSpacing: 0.2,
   },
-  artistCompact: { fontSize: 11, marginTop: 2 },
   activeBar: {
     width: 3,
     height: 20,
@@ -690,14 +526,14 @@ const styles = StyleSheet.create({
     backgroundColor: Colors.dark.accent,
   },
 
-  // ── Empty states ──────────────────────────────────────────────────────
+  // ── Empty state ───────────────────────────────────────────────────────
   empty: {
     flex: 1,
     alignItems: "center",
     justifyContent: "center",
-    gap: 12,
-    paddingBottom: 80,
+    gap: 10,
     paddingHorizontal: 40,
+    paddingBottom: 80,
   },
   emptyIcon: {
     width: 72,
@@ -712,6 +548,7 @@ const styles = StyleSheet.create({
     color: Colors.dark.textSecondary,
     fontSize: 16,
     fontFamily: "Inter_500Medium",
+    textAlign: "center",
   },
   emptyHint: {
     color: Colors.dark.textTertiary,
@@ -720,21 +557,21 @@ const styles = StyleSheet.create({
     textAlign: "center",
   },
 
-  // ── Select action bar ─────────────────────────────────────────────────
+  // ── Select-mode action bar ─────────────────────────────────────────────
   actionBar: {
     position: "absolute",
     left: 0,
     right: 0,
     paddingHorizontal: 24,
-    paddingTop: 14,
-    backgroundColor: Colors.dark.background,
+    paddingTop: 12,
+    backgroundColor: Colors.dark.surface,
     borderTopWidth: StyleSheet.hairlineWidth,
     borderTopColor: Colors.dark.border,
   },
   removeBtn: {
     backgroundColor: Colors.dark.danger,
-    borderRadius: 50,
-    paddingVertical: 15,
+    borderRadius: 12,
+    paddingVertical: 14,
     alignItems: "center",
   },
   removeBtnDisabled: { opacity: 0.4 },

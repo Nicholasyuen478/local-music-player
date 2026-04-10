@@ -1,0 +1,28 @@
+Context: Because our local audio files have inconsistent naming and we cannot accurately extract ID3 metadata (Title/Artist) until the file is actually playing via `react-native-track-player`, our current Library list UI looks messy. We need to pivot the Library screen design to be more honest, minimalist, and file-centric, while introducing a reliable user-driven "Favorites" system.
+
+Please implement the following UI/UX architecture and functional changes:
+
+1. Simplify the Library Filters (Top Tab Bar)
+- Remove the "Artists" filter pill completely.
+- The filter pills should now be: "Liked", "Recent", and "Songs".
+- "Songs" remains the default active tab on load.
+- Ensure the active pill uses the premium warm amber/orange accent color.
+
+2. "Honest" Song List Rows (Library Screen)
+- Stop trying to guess the Title and Artist to display on two separate lines in the Library list.
+- For each row, simply display the raw filename, but strip out the file extension (e.g., remove `.mp3`, `.flac`, `.m4a`).
+- Display this cleaned filename on a single line. Use a clean, medium-weight white font (e.g., `fontSize: 16`, `fontWeight: '500'`).
+- If the text is too long, ensure it truncates gracefully with an ellipsis (`numberOfLines={1}`, `ellipsizeMode="tail"`).
+- Below the filename, display the file duration (if available from `expo-media-library`) in a small, muted gray font to give it a clean file-browser aesthetic.
+
+3. The "Liked" Playlist System (User-Driven Favorites)
+- We now have two main playlists: "All Songs" and "Favorites".
+- On the Player Screen, ensure there is a Heart icon button (using `lucide-react-native`).
+- If the currently playing song is in the user's favorites, the Heart icon should be filled with the warm amber/orange accent color. If not, it should be a white outline.
+- Tapping the Heart icon toggles the current song's URI in a `favorites` array stored in `AsyncStorage`.
+- When the user selects the "Liked" tab on the Library Screen, filter the master song list to ONLY render the rows whose URIs exist in that `AsyncStorage` favorites array.
+
+4. The Player Screen (The Reveal)
+- The Library screen acts as the raw file browser, but the Player Screen remains our premium "reveal".
+- Ensure that once a song is tapped and begins playing, the `react-native-track-player` event listener (`Event.MetadataCommonReceived`) kicks in to extract the REAL Title and Artist.
+- Update the Player Screen UI to show this polished, official metadata (if it exists) instead of the messy filename.
