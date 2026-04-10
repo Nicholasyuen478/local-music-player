@@ -1,7 +1,6 @@
 import * as Haptics from "expo-haptics";
 import { Image } from "expo-image";
-import * as ImagePicker from "expo-image-picker";
-import { router } from "expo-router";
+import { router, useFocusEffect } from "expo-router";
 import { ChevronLeft, ImageIcon, Plus, Scissors, X } from "lucide-react-native";
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import {
@@ -16,7 +15,6 @@ import {
   useWindowDimensions,
   View,
 } from "react-native";
-import { useFocusEffect } from "expo-router";
 import ImageCropPicker from "react-native-image-crop-picker";
 import Colors from "@/constants/colors";
 import { useMusicContext } from "@/context/MusicContext";
@@ -98,7 +96,7 @@ function ThumbImg({ uri, size }: ThumbImgProps) {
 export default function ImagesScreen() {
   const { topInset, bottomInset, tabBarH, isCompact } = useLayout();
   const { width } = useWindowDimensions();
-  const { imagePool, addImagesToPool, removeImageFromPool, cropImageInPool } =
+  const { imagePool, pickImageFolder, removeImageFromPool, cropImageInPool } =
     useMusicContext();
 
   const thumbSize = Math.floor((width - GAP * (COLUMNS + 1)) / COLUMNS);
@@ -120,19 +118,9 @@ export default function ImagesScreen() {
   const handlePickFiles = async () => {
     setIsAdding(true);
     try {
-      const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
-      if (status !== "granted") return;
-      const result = await ImagePicker.launchImageLibraryAsync({
-        mediaTypes: ["images"],
-        allowsMultipleSelection: true,
-        quality: 1,
-        exif: false,
-      });
-      if (!result.canceled && result.assets.length > 0) {
-        const uris = result.assets.map((a) => a.uri);
-        await addImagesToPool(uris);
-        Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-      }
+      // pickImageFolder: copies to permanent storage then adds to pool
+      const added = await pickImageFolder();
+      if (added) Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
     } catch (e) { console.error("pick error", e); }
     finally { setIsAdding(false); }
   };
@@ -223,7 +211,7 @@ export default function ImagesScreen() {
           showsVerticalScrollIndicator={false}
           contentContainerStyle={{
             paddingHorizontal: GAP,
-            paddingBottom: bottomInset + tabBarH + 16,
+            paddingBottom: bottomInset + tabBarH + 88,   // leave room for FAB
             gap: GAP,
           }}
           columnWrapperStyle={{ gap: GAP }}
@@ -272,6 +260,20 @@ export default function ImagesScreen() {
           }}
         />
       )}
+
+      {/* ── Floating Action Button ─────────────────────────────────────── */}
+      <TouchableOpacity
+        style={[styles.fab, { bottom: bottomInset + tabBarH + 20 }]}
+        onPress={handlePickFiles}
+        disabled={isAdding}
+        activeOpacity={0.82}
+      >
+        {isAdding
+          ? <ActivityIndicator size="small" color="#fff" />
+          : <Plus size={26} color="#fff" strokeWidth={2.5} />
+        }
+      </TouchableOpacity>
+
     </View>
   );
 }
@@ -379,5 +381,22 @@ const styles = StyleSheet.create({
     fontSize: 13,
     fontFamily: "Inter_400Regular",
     textAlign: "center",
+  },
+
+  // ── Floating action button ─────────────────────────────────────────────
+  fab: {
+    position: "absolute",
+    right: 24,
+    width: 60,
+    height: 60,
+    borderRadius: 30,
+    backgroundColor: Colors.dark.accent,
+    alignItems: "center",
+    justifyContent: "center",
+    shadowColor: Colors.dark.accent,
+    shadowOffset: { width: 0, height: 6 },
+    shadowOpacity: 0.55,
+    shadowRadius: 14,
+    elevation: 10,
   },
 });

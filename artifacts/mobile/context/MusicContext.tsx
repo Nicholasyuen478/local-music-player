@@ -80,6 +80,7 @@ const STORAGE_KEYS = {
   SHUFFLE: "shuffle_enabled",
   RECENTLY_PLAYED: "recently_played",
   FAVORITES: "favorites_v1",
+  ARTWORK_MAP: "artwork_map_v1",
 };
 
 const AUDIO_EXTENSIONS = new Set([
@@ -294,6 +295,13 @@ const [MusicContextProvider, useMusicContext] = createContextHook(() => {
   // structurally, not just reactively.
   const artworkMap = useRef(new Map<string, string>());
 
+  // Persist artworkMap to AsyncStorage (non-blocking)
+  const saveArtworkMap = useCallback(() => {
+    const obj: Record<string, string> = {};
+    artworkMap.current.forEach((v, k) => { obj[k] = v; });
+    AsyncStorage.setItem(STORAGE_KEYS.ARTWORK_MAP, JSON.stringify(obj)).catch(() => {});
+  }, []);
+
   // URIs added in the current picker session — consumed once to prioritise
   // showing fresh images immediately after the user adds them.
   const pendingNewUris = useRef<string[]>([]);
@@ -405,7 +413,7 @@ const [MusicContextProvider, useMusicContext] = createContextHook(() => {
     try {
       const [
         cachedSongs, pool, customFlag, imgFolder,
-        savedQueue, savedIndex, savedShuffle, favRaw,
+        savedQueue, savedIndex, savedShuffle, favRaw, artMapRaw,
       ] = await Promise.all([
         AsyncStorage.getItem(STORAGE_KEYS.SONGS),
         AsyncStorage.getItem(STORAGE_KEYS.IMAGE_POOL),
@@ -415,7 +423,16 @@ const [MusicContextProvider, useMusicContext] = createContextHook(() => {
         AsyncStorage.getItem(STORAGE_KEYS.CURRENT_INDEX),
         AsyncStorage.getItem(STORAGE_KEYS.SHUFFLE),
         AsyncStorage.getItem(STORAGE_KEYS.FAVORITES),
+        AsyncStorage.getItem(STORAGE_KEYS.ARTWORK_MAP),
       ]);
+
+      // Restore persisted song→image assignments
+      if (artMapRaw) {
+        try {
+          const obj = JSON.parse(artMapRaw) as Record<string, string>;
+          artworkMap.current = new Map(Object.entries(obj));
+        } catch {}
+      }
 
       if (favRaw) {
         try { setFavorites(JSON.parse(favRaw) as string[]); } catch {}
@@ -651,6 +668,7 @@ const [MusicContextProvider, useMusicContext] = createContextHook(() => {
         }
 
         artworkMap.current = buildArtworkSequence(newQueue, imagePoolRef.current);
+        saveArtworkMap();
         await TrackPlayer.setQueue(newQueue.map(songToTrack));
         if (targetIdx > 0) await TrackPlayer.skip(targetIdx);
         await TrackPlayer.play();
@@ -664,7 +682,7 @@ const [MusicContextProvider, useMusicContext] = createContextHook(() => {
         console.error("playSongFromLibrary error", e);
       }
     },
-    [shuffleEnabled, songs],
+    [shuffleEnabled, songs, saveArtworkMap],
   );
 
   // ── Play from a context-specific list (Liked / Recent / filtered Songs) ──
@@ -688,6 +706,7 @@ const [MusicContextProvider, useMusicContext] = createContextHook(() => {
         }
 
         artworkMap.current = buildArtworkSequence(newQueue, imagePoolRef.current);
+        saveArtworkMap();
         await TrackPlayer.reset();
         await TrackPlayer.add(newQueue.map(songToTrack));
         if (targetIdx > 0) await TrackPlayer.skip(targetIdx);
@@ -702,7 +721,7 @@ const [MusicContextProvider, useMusicContext] = createContextHook(() => {
         console.error("playFromContext error", e);
       }
     },
-    [shuffleEnabled],
+    [shuffleEnabled, saveArtworkMap],
   );
 
   // ── Playback controls ─────────────────────────────────────────────────────
@@ -732,6 +751,7 @@ const [MusicContextProvider, useMusicContext] = createContextHook(() => {
 
     // Always reset to the first song in the new order when toggling shuffle
     artworkMap.current = buildArtworkSequence(newOrder, imagePoolRef.current);
+    saveArtworkMap();
 
     await TrackPlayer.setQueue(newOrder.map(songToTrack));
     await TrackPlayer.skip(0);
@@ -757,6 +777,27 @@ const [MusicContextProvider, useMusicContext] = createContextHook(() => {
       return next;
     });
   }, []);
+
+  // ── Re-Roll artwork for current song ─────────────────────────────────────
+  const reRollArtwork = useCallback(() => {
+    if (!currentSong || !imagePoolRef.current.length) return;
+    const pool = imagePoolRef.current;
+    const current = artworkMap.current.get(currentSong.id) ?? null;
+    const candidates = pool.filter((u) => u !== current);
+    const from = candidates.length > 0 ? candidates : pool;
+    const picked = from[Math.floor(Math.random() * from.length)];
+    artworkMap.current.set(currentSong.id, picked);
+    setCurrentArtworkUri(picked);
+    saveArtworkMap();
+  }, [currentSong, saveArtworkMap]);
+
+  // ── Manually assign a specific image to current song ─────────────────────
+  const assignArtwork = useCallback((uri: string) => {
+    if (!currentSong) return;
+    artworkMap.current.set(currentSong.id, uri);
+    setCurrentArtworkUri(uri);
+    saveArtworkMap();
+  }, [currentSong, saveArtworkMap]);
 
   // ── Image pool management ─────────────────────────────────────────────────
 
@@ -861,6 +902,8 @@ const [MusicContextProvider, useMusicContext] = createContextHook(() => {
     playPrev,
     toggleShuffle,
     toggleFavorite,
+    reRollArtwork,
+    assignArtwork,
     addImagesToPool,
     removeImageFromPool,
     pickImageFolder,

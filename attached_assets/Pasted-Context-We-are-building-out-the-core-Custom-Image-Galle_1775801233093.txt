@@ -1,0 +1,29 @@
+Context: We are building out the core "Custom Image Gallery & Randomizer" feature. The app's unique selling point is that users upload their own images, and the app uses them as album artwork. We need to implement the backend logic and the premium UI for this system.
+
+Please implement the following architecture:
+
+1. Gallery State & Permanent Storage
+- Use `expo-image-picker` to allow users to upload images (enable `allowsMultipleSelection` so they can bulk upload).
+- CRITICAL: Copy the selected images from the temporary cache to `FileSystem.documentDirectory` using `expo-file-system` to ensure they are permanent.
+- Save this array of permanent image URIs in `AsyncStorage` under a `galleryImages` key.
+
+2. Persistent Randomization Logic (The Engine)
+- Create a mapping object in `AsyncStorage` called `artworkMap` (e.g., `{ "fileUri": "imageUri" }`).
+- Whenever the Library loads or a song plays, check if the song's URI exists in `artworkMap`.
+- If it DOES NOT exist: Pick a random image URI from the `galleryImages` array, assign it to the song, and save it to `artworkMap`. (It is perfectly fine if the same image is assigned to multiple songs).
+- If the `galleryImages` array is empty, use a premium dark default placeholder.
+
+3. The Gallery Screen UI (The Vault)
+- Display the `galleryImages` in a clean, 3-column Grid view. 
+- Give each image `aspectRatio: 1`, `borderRadius: 8`, and a 1px faint white border (`rgba(255,255,255,0.1)`).
+- Add a prominent Floating Action Button (FAB) in the bottom right corner with a `+` icon (using the warm amber/orange accent color) to upload new images.
+- Add a small `x` or trash icon in the top-right of each grid image to delete it from the gallery. (If deleted, also remove its references from `artworkMap` so those songs get newly randomized images).
+
+4. Player Screen "Quick Edit" Bottom Sheet
+- When the user taps the frosted-glass "Edit" button on the Player Screen, open a Bottom Sheet Modal (a view that slides up from the bottom).
+- Inside this modal, provide three premium action rows (using `lucide-react-native` icons):
+  1. 🎲 "Re-Roll Artwork" -> Instantly picks a new random image from the gallery, updates `artworkMap` for the current song, and updates the Player UI.
+  2. 🖼️ "Choose from Gallery" -> Opens a mini horizontal `ScrollView` of the user's gallery images right there in the modal to manually tap and assign one.
+  3. 📱 "Upload New Photo" -> Opens the OS image picker, saves the new image to the gallery, and instantly assigns it to the current song.
+
+Task: Implement the permanent file storage, the persistent random assignment logic via AsyncStorage, the Gallery Grid UI, and the Player Screen Bottom Sheet.
