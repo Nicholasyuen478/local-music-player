@@ -399,6 +399,10 @@ export default function LibraryScreen() {
                   setFilterMode(mode);
                   setSearchText("");
                   setExpandedArtists(new Set());
+                  // Reset scroll to top when switching to any filter
+                  setTimeout(() => {
+                    listRef.current?.scrollToOffset({ offset: 0, animated: false });
+                  }, 0);
                 }}
                 activeOpacity={0.75}
               >

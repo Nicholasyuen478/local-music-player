@@ -260,15 +260,15 @@ export default function PlayerScreen() {
   // EMPTY STATE — no songs loaded yet
   // ══════════════════════════════════════════════════════════════════════
 
-  // While the context is hydrating from storage, show a blank dark screen
-  // instead of briefly flashing the setup page
-  if (isLoading) {
+  // Blank guard only for the initial boot load, not for re-scans.
+  // When isScanning is true the setup page shows with its scanning animation.
+  if (isLoading && !isScanning) {
     return <View style={{ flex: 1, backgroundColor: Colors.dark.background }} />;
   }
 
   const isEmpty = !isSetupDone || songs.length === 0;
 
-  if (isEmpty) {
+  if (isEmpty || isScanning) {
     const orbSize  = Math.min(width * 0.62, 240);
     const coreSize = orbSize * 0.48;
     const scanning = isScanning || isLoading;

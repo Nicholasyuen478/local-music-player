@@ -2,12 +2,13 @@ import * as Haptics from "expo-haptics";
 import { Image } from "expo-image";
 import * as ImagePicker from "expo-image-picker";
 import { router } from "expo-router";
-import { ImageIcon, Plus, Scissors, X } from "lucide-react-native";
+import { ChevronLeft, ImageIcon, Plus, Scissors, X } from "lucide-react-native";
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import {
   ActivityIndicator,
   Alert,
   AppState,
+  BackHandler,
   FlatList,
   StyleSheet,
   Text,
@@ -15,6 +16,7 @@ import {
   useWindowDimensions,
   View,
 } from "react-native";
+import { useFocusEffect } from "expo-router";
 import ImageCropPicker from "react-native-image-crop-picker";
 import Colors from "@/constants/colors";
 import { useMusicContext } from "@/context/MusicContext";
@@ -104,6 +106,17 @@ export default function ImagesScreen() {
   const [isAdding,    setIsAdding]    = useState(false);
   const [croppingUri, setCroppingUri] = useState<string | null>(null);
 
+  // Hardware back → return to player screen
+  useFocusEffect(
+    useCallback(() => {
+      const sub = BackHandler.addEventListener("hardwareBackPress", () => {
+        router.navigate("/(tabs)");
+        return true;
+      });
+      return () => sub.remove();
+    }, []),
+  );
+
   const handlePickFiles = async () => {
     setIsAdding(true);
     try {
@@ -168,6 +181,13 @@ export default function ImagesScreen() {
 
       {/* Header */}
       <View style={[styles.header, isCompact && styles.headerCompact]}>
+        <TouchableOpacity
+          onPress={() => router.navigate("/(tabs)")}
+          style={styles.iconCircle}
+          hitSlop={10}
+        >
+          <ChevronLeft size={isCompact ? 18 : 20} color={Colors.dark.textSecondary} />
+        </TouchableOpacity>
         <Text style={styles.headerCount}>
           {imagePool.length > 0 ? `${imagePool.length} images` : "Artwork pool"}
         </Text>

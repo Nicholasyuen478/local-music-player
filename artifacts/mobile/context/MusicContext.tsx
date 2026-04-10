@@ -336,13 +336,9 @@ const [MusicContextProvider, useMusicContext] = createContextHook(() => {
       return;
     }
 
-    // Fallback: song not yet in map or its image was removed.
-    // Pick randomly, avoiding the image that the *previous* song in the queue had.
-    const prevSong = queue[currentIndex - 1] ?? null;
-    const prevUri = prevSong ? artworkMap.current.get(prevSong.id) ?? null : null;
-    const candidates = pool.filter((u) => u !== prevUri);
-    const available = candidates.length > 0 ? candidates : pool;
-    const picked = available[Math.floor(Math.random() * available.length)];
+    // Fallback: image was removed, cropped, or song never assigned.
+    // Always use the first image in the pool so the player is never blank.
+    const picked = pool[0];
     artworkMap.current.set(songId, picked);
     setCurrentArtworkUri(picked);
   }, [currentSong?.id, imagePool]);
@@ -359,11 +355,10 @@ const [MusicContextProvider, useMusicContext] = createContextHook(() => {
 
     // ── Recently played tracking ─────────────────────────────────────────
     if (song) {
+      // In-session only — capped at 10, not persisted (resets on app restart)
       setRecentlyPlayed((prev) => {
         const filtered = prev.filter((s) => s.id !== song.id);
-        const next = [song, ...filtered].slice(0, 50);
-        AsyncStorage.setItem(STORAGE_KEYS.RECENTLY_PLAYED, JSON.stringify(next)).catch(() => {});
-        return next;
+        return [song, ...filtered].slice(0, 10);
       });
     }
 
@@ -383,7 +378,7 @@ const [MusicContextProvider, useMusicContext] = createContextHook(() => {
     try {
       const [
         cachedSongs, pool, customFlag, imgFolder,
-        savedQueue, savedIndex, savedShuffle, recentRaw,
+        savedQueue, savedIndex, savedShuffle,
       ] = await Promise.all([
         AsyncStorage.getItem(STORAGE_KEYS.SONGS),
         AsyncStorage.getItem(STORAGE_KEYS.IMAGE_POOL),
@@ -392,12 +387,7 @@ const [MusicContextProvider, useMusicContext] = createContextHook(() => {
         AsyncStorage.getItem(STORAGE_KEYS.QUEUE),
         AsyncStorage.getItem(STORAGE_KEYS.CURRENT_INDEX),
         AsyncStorage.getItem(STORAGE_KEYS.SHUFFLE),
-        AsyncStorage.getItem(STORAGE_KEYS.RECENTLY_PLAYED),
       ]);
-
-      if (recentRaw) {
-        try { setRecentlyPlayed(JSON.parse(recentRaw) as Song[]); } catch {}
-      }
 
       if (imgFolder) setImageFolderUri(imgFolder);
       // Shuffle is intentionally NOT restored on restart — always boot in

@@ -28,7 +28,7 @@ function parseLrc(lrc: string): LrcLine[] {
 }
 
 // ── Types ─────────────────────────────────────────────────────────────────────
-type Source = "lrclib" | "petitlyrics" | "genius";
+type Source = "lrclib" | "netease" | "qqmusic";
 type LyricData = { lrcLines: LrcLine[]; plain: string };
 type FetchStatus = "idle" | "loading" | "done" | "empty" | "no-network";
 
@@ -38,8 +38,8 @@ const songSourceMap = new Map<string, Source>();
 
 const SOURCE_LABELS: Record<Source, string> = {
   lrclib: "LRClib",
-  petitlyrics: "PetitLyrics",
-  genius: "Genius",
+  netease: "Netease",
+  qqmusic: "QQ Music",
 };
 
 // ── Fetchers ──────────────────────────────────────────────────────────────────
@@ -62,72 +62,86 @@ async function fetchLrclib(
   return null;
 }
 
-async function fetchPetitLyrics(
+async function fetchNetease(
   title: string,
   artist: string,
   signal: AbortSignal,
 ): Promise<LyricData | null> {
-  const url =
-    `https://papi.petitlyrics.com/api/GetPetitLyricsData.php` +
-    `?title=${encodeURIComponent(title)}&artist=${encodeURIComponent(artist)}&key=01`;
-  const r = await fetch(url, { signal });
-  if (!r.ok) return null;
-  const xml = await r.text();
-
-  const lyricMatch = xml.match(/<Lyric>([\s\S]*?)<\/Lyric>/);
-  const typeMatch  = xml.match(/<LyricType>(\d+)<\/LyricType>/);
-  if (!lyricMatch) return null;
-
-  let content = lyricMatch[1].trim();
-  try { content = atob(content); } catch { /* already plaintext */ }
-
-  const lyricType = typeMatch ? parseInt(typeMatch[1], 10) : 0;
-  if (lyricType === 3) {
-    const lrcLines = parseLrc(content);
-    if (lrcLines.length) return { lrcLines, plain: "" };
-  }
-  return content.trim() ? { lrcLines: [], plain: content.trim() } : null;
-}
-
-async function fetchGenius(
-  title: string,
-  artist: string,
-  signal: AbortSignal,
-): Promise<LyricData | null> {
-  const q = `${title} ${artist}`;
+  const q = encodeURIComponent(`${title} ${artist}`);
   const searchR = await fetch(
-    `https://genius.com/api/search/multi?q=${encodeURIComponent(q)}`,
-    { signal, headers: { "X-Requested-With": "XMLHttpRequest" } },
+    `https://music.163.com/api/search/get?s=${q}&type=1&limit=3&offset=0`,
+    {
+      signal,
+      headers: {
+        "Referer": "https://music.163.com",
+        "Content-Type": "application/x-www-form-urlencoded",
+      },
+    },
   );
   if (!searchR.ok) return null;
   const searchD = await searchR.json() as any;
 
-  let songUrl: string | null = null;
-  for (const section of (searchD?.response?.sections ?? [])) {
-    const hit = (section?.hits ?? []).find((h: any) => h?.type === "song");
-    if (hit?.result?.url) { songUrl = hit.result.url; break; }
-  }
-  if (!songUrl) return null;
+  const songId: number | undefined = searchD?.result?.songs?.[0]?.id;
+  if (!songId) return null;
 
-  const pageR = await fetch(songUrl, { signal });
-  if (!pageR.ok) return null;
-  const html = await pageR.text();
+  const lyricsR = await fetch(
+    `https://music.163.com/api/song/lyric?id=${songId}&lv=-1&kv=-1&tv=-1`,
+    {
+      signal,
+      headers: { "Referer": "https://music.163.com" },
+    },
+  );
+  if (!lyricsR.ok) return null;
+  const lyricsD = await lyricsR.json() as any;
 
-  const parts: string[] = [];
-  for (const m of html.matchAll(/data-lyrics-container="true"[^>]*>([\s\S]*?)<\/div>/g)) {
-    parts.push(
-      m[1]
-        .replace(/<br\s*\/?>/gi, "\n")
-        .replace(/<[^>]+>/g, "")
-        .replace(/&amp;/g, "&")
-        .replace(/&lt;/g, "<")
-        .replace(/&gt;/g, ">")
-        .replace(/&#x27;/g, "'")
-        .replace(/&quot;/g, '"')
-        .trim(),
-    );
+  const lrcRaw: string | undefined = lyricsD?.lrc?.lyric;
+  if (lrcRaw) {
+    const lrcLines = parseLrc(lrcRaw);
+    if (lrcLines.length) return { lrcLines, plain: "" };
+    // Has lyric block but no timestamps — treat as plain
+    const plain = lrcRaw.replace(/\[[^\]]*\]/g, "").replace(/\n{3,}/g, "\n\n").trim();
+    if (plain) return { lrcLines: [], plain };
   }
-  const plain = parts.filter(Boolean).join("\n\n").trim();
+  return null;
+}
+
+async function fetchQQMusic(
+  title: string,
+  artist: string,
+  signal: AbortSignal,
+): Promise<LyricData | null> {
+  const q = encodeURIComponent(`${title} ${artist}`);
+  const searchR = await fetch(
+    `https://c.y.qq.com/soso/fcgi-bin/client_search_cp` +
+    `?w=${q}&n=3&format=json&inCharset=utf8&outCharset=utf-8` +
+    `&platform=yqq.json&needNewCode=0&t=0`,
+    { signal, headers: { "Referer": "https://y.qq.com" } },
+  );
+  if (!searchR.ok) return null;
+  const searchD = await searchR.json() as any;
+
+  const songMid: string | undefined = searchD?.data?.song?.list?.[0]?.songmid;
+  if (!songMid) return null;
+
+  const lyricsR = await fetch(
+    `https://c.y.qq.com/lyric/fcgi-bin/fcg_query_lyric_new.fcg` +
+    `?songmid=${songMid}&g_tk=5381&format=json&inCharset=utf8` +
+    `&outCharset=utf-8&platform=yqq.json&needNewCode=0`,
+    { signal, headers: { "Referer": "https://y.qq.com" } },
+  );
+  if (!lyricsR.ok) return null;
+  const lyricsD = await lyricsR.json() as any;
+
+  // QQ Music lyrics are base64-encoded
+  const b64: string | undefined = lyricsD?.lyric;
+  if (!b64) return null;
+
+  let decoded: string;
+  try { decoded = atob(b64); } catch { return null; }
+
+  const lrcLines = parseLrc(decoded);
+  if (lrcLines.length) return { lrcLines, plain: "" };
+  const plain = decoded.replace(/\[[^\]]*\]/g, "").replace(/\n{3,}/g, "\n\n").trim();
   return plain ? { lrcLines: [], plain } : null;
 }
 
@@ -137,9 +151,9 @@ async function fetchSource(
   artist: string,
   signal: AbortSignal,
 ): Promise<LyricData | null> {
-  if (source === "lrclib")     return fetchLrclib(title, artist, signal);
-  if (source === "petitlyrics") return fetchPetitLyrics(title, artist, signal);
-  return fetchGenius(title, artist, signal);
+  if (source === "lrclib")  return fetchLrclib(title, artist, signal);
+  if (source === "netease") return fetchNetease(title, artist, signal);
+  return fetchQQMusic(title, artist, signal);
 }
 
 // ── Component ─────────────────────────────────────────────────────────────────
@@ -224,7 +238,7 @@ export function LyricsPanel({ title, artist, trackId, position }: Props) {
   // ── Source selector ────────────────────────────────────────────────────────
   const sourceSelector = (
     <View style={styles.sourceRow}>
-      {(["lrclib", "petitlyrics", "genius"] as Source[]).map((s) => (
+      {(["lrclib", "netease", "qqmusic"] as Source[]).map((s) => (
         <TouchableOpacity
           key={s}
           style={[styles.sourceBtn, source === s && styles.sourceBtnActive]}
