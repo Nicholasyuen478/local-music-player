@@ -106,7 +106,7 @@ export default function ImagesScreen() {
   useFocusEffect(
     useCallback(() => {
       const sub = BackHandler.addEventListener("hardwareBackPress", () => {
-        router.back();
+        router.navigate("/(tabs)");
         return true;
       });
       return () => sub.remove();
@@ -173,7 +173,7 @@ export default function ImagesScreen() {
       {/* ── Header ── */}
       <View style={[styles.header, isCompact && styles.headerCompact]}>
         <TouchableOpacity
-          onPress={() => router.back()}
+          onPress={() => router.navigate("/(tabs)")}
           style={styles.iconCircle}
           hitSlop={10}
         >
@@ -184,18 +184,8 @@ export default function ImagesScreen() {
           {imagePool.length > 0 ? `${imagePool.length} images` : "Artwork vault"}
         </Text>
 
-        <TouchableOpacity
-          style={[styles.addBtn, isAdding && styles.addBtnLoading]}
-          onPress={handlePickFiles}
-          activeOpacity={0.7}
-          disabled={isAdding}
-          hitSlop={8}
-        >
-          {isAdding
-            ? <ActivityIndicator size="small" color="#fff" />
-            : <Plus size={20} color="#fff" />
-          }
-        </TouchableOpacity>
+        {/* Spacer to keep title centred */}
+        <View style={styles.iconCircle} />
       </View>
 
       {/* ── Grid or empty state ── */}
@@ -311,16 +301,6 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
   },
-
-  addBtn: {
-    width: 38,
-    height: 38,
-    borderRadius: 19,
-    backgroundColor: Colors.dark.accent,
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  addBtnLoading: { opacity: 0.55 },
 
   thumb: {
     borderRadius: 10,
