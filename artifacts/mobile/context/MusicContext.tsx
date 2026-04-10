@@ -747,9 +747,16 @@ const [MusicContextProvider, useMusicContext] = createContextHook(() => {
     setShuffleEnabled(next);
     await AsyncStorage.setItem(STORAGE_KEYS.SHUFFLE, String(next));
 
-    const newOrder = next ? shuffleArray(songs) : [...songs];
+    // Context-aware: if the current song is a favorite, shuffle/unshuffle
+    // within the favorites list only. Otherwise operate on all songs.
+    const favSet = new Set(favorites);
+    const isInFavContext = currentSong ? favSet.has(currentSong.uri) : false;
+    const contextSongs = isInFavContext
+      ? songs.filter((s) => favSet.has(s.uri))
+      : [...songs];
 
-    // Always reset to the first song in the new order when toggling shuffle
+    const newOrder = next ? shuffleArray(contextSongs) : [...contextSongs];
+
     artworkMap.current = buildArtworkSequence(newOrder, imagePoolRef.current);
     saveArtworkMap();
 
@@ -761,7 +768,7 @@ const [MusicContextProvider, useMusicContext] = createContextHook(() => {
       [STORAGE_KEYS.QUEUE, JSON.stringify(newOrder)],
       [STORAGE_KEYS.CURRENT_INDEX, "0"],
     ]);
-  }, [shuffleEnabled, songs]);
+  }, [shuffleEnabled, songs, favorites, currentSong, saveArtworkMap]);
 
   const seekTo = useCallback(async (secs: number) => {
     await TrackPlayer.seekTo(secs);

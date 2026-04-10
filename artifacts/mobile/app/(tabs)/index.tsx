@@ -487,10 +487,7 @@ export default function PlayerScreen() {
             style={styles.artEditBtnWrap}
             onPress={() => {
               Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-              router.push({
-                pathname: "/(tabs)/images",
-                params: { trackUri: currentSong?.uri ?? "" },
-              });
+              router.push("/(tabs)/images");
             }}
             activeOpacity={0.8}
             hitSlop={14}
