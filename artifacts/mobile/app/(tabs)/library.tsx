@@ -46,7 +46,7 @@ export default function LibraryScreen() {
     isSetupDone,
     recentlyPlayed,
     favorites,
-    playSongFromLibrary,
+    playFromContext,
     removeSongs,
   } = useMusicContext();
 
@@ -128,10 +128,10 @@ export default function LibraryScreen() {
           return next;
         });
       } else {
-        playSongFromLibrary(item);
+        playFromContext(item, displayedSongs);
       }
     },
-    [selectMode, playSongFromLibrary],
+    [selectMode, playFromContext, displayedSongs],
   );
 
   const handleRemove = useCallback(() => {

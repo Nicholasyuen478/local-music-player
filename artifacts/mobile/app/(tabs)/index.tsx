@@ -98,9 +98,15 @@ export default function PlayerScreen() {
     }
   });
 
-  // ── Resolved title/artist: native ID3 tags > filename parse ───────────
-  const displayTitle  = nativeMeta?.title  ?? currentSong?.title  ?? "";
-  const displayArtist = nativeMeta?.artist ?? currentSong?.artist ?? "";
+  // ── Resolved title/artist ──────────────────────────────────────────────
+  // Priority: native ID3 tags → filename parse → hard fallback
+  // If no ID3 metadata arrives, show the filename (no extension) as title
+  // and "Unknown Artist" so the UI is never empty.
+  const filenameTitle = currentSong
+    ? currentSong.filename.replace(/\.[^/.]+$/, "")
+    : "";
+  const displayTitle  = nativeMeta?.title  ?? (currentSong ? filenameTitle  : "");
+  const displayArtist = nativeMeta?.artist ?? (currentSong ? (currentSong.artist || "Unknown Artist") : "");
 
   // ── Artwork size: hero element — 88% of screen width ──────────────────
   const playerArtSize = Math.min(

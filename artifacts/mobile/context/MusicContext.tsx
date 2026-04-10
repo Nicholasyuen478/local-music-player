@@ -1,4 +1,5 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
+import * as FileSystem from "expo-file-system";
 import createContextHook from "@nkzw/create-context-hook";
 import TrackPlayer, {
   Capability,
@@ -181,6 +182,26 @@ async function scanDeviceAudio(): Promise<Song[]> {
   return songs;
 }
 
+// ── Permanent artwork storage ─────────────────────────────────────────────────
+// Expo image picker returns temporary cache URIs that disappear between sessions.
+// This helper copies an image to app's documentDirectory so it survives restarts.
+const ARTWORK_DIR = `${FileSystem.documentDirectory}artwork/`;
+
+async function ensureArtworkDir(): Promise<void> {
+  const info = await FileSystem.getInfoAsync(ARTWORK_DIR);
+  if (!info.exists) await FileSystem.makeDirectoryAsync(ARTWORK_DIR, { intermediates: true });
+}
+
+async function copyToPermanent(tempUri: string): Promise<string> {
+  await ensureArtworkDir();
+  // Derive extension from URI; fall back to .jpg
+  const ext = tempUri.split("?")[0].match(/\.[a-zA-Z0-9]+$/)?.[0] ?? ".jpg";
+  const filename = `artwork_${Date.now()}_${Math.random().toString(36).slice(2)}${ext}`;
+  const dest = `${ARTWORK_DIR}${filename}`;
+  await FileSystem.copyAsync({ from: tempUri, to: dest });
+  return dest;
+}
+
 async function pickImagesViaGallery(): Promise<string[]> {
   const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
   if (status !== "granted") return [];
@@ -191,7 +212,11 @@ async function pickImagesViaGallery(): Promise<string[]> {
     exif: false,
   });
   if (result.canceled || !result.assets) return [];
-  return result.assets.map((a) => a.uri);
+  // Copy each picked image to permanent storage before returning URIs
+  const permanentUris = await Promise.all(
+    result.assets.map((a) => copyToPermanent(a.uri)),
+  );
+  return permanentUris;
 }
 
 function shuffleArray<T>(arr: T[]): T[] {
@@ -404,7 +429,29 @@ const [MusicContextProvider, useMusicContext] = createContextHook(() => {
 
       let resolvedPool: string[];
       if (pool) {
-        resolvedPool = JSON.parse(pool) as string[];
+        const parsed: string[] = JSON.parse(pool);
+        // Validate permanent file:// URIs — remove any that were deleted/moved
+        const validated = await Promise.all(
+          parsed.map(async (uri) => {
+            if (!uri.startsWith("file://")) return uri;     // http/https URIs always valid
+            const info = await FileSystem.getInfoAsync(uri).catch(() => ({ exists: false }));
+            return info.exists ? uri : null;
+          }),
+        );
+        resolvedPool = validated.filter((u): u is string => u !== null);
+        if (resolvedPool.length !== parsed.length) {
+          // Persist cleaned pool
+          await AsyncStorage.setItem(STORAGE_KEYS.IMAGE_POOL, JSON.stringify(resolvedPool));
+        }
+        if (resolvedPool.length === 0) {
+          // All custom images gone — fall back to defaults
+          resolvedPool = await getDefaultArtworkUris();
+          await AsyncStorage.multiSet([
+            [STORAGE_KEYS.IMAGE_POOL, JSON.stringify(resolvedPool)],
+            [STORAGE_KEYS.IMAGE_POOL_CUSTOM, "false"],
+          ]);
+          setHasCustomImages(false);
+        }
       } else {
         resolvedPool = await getDefaultArtworkUris();
         await AsyncStorage.setItem(STORAGE_KEYS.IMAGE_POOL, JSON.stringify(resolvedPool));
@@ -620,6 +667,44 @@ const [MusicContextProvider, useMusicContext] = createContextHook(() => {
     [shuffleEnabled, songs],
   );
 
+  // ── Play from a context-specific list (Liked / Recent / filtered Songs) ──
+  // This is the context-aware queue builder. Whatever list the user is currently
+  // viewing in the library becomes the exclusive, isolated playback queue.
+  const playFromContext = useCallback(
+    async (song: Song, contextList: Song[]) => {
+      if (!contextList.length) return;
+      try {
+        let newQueue: Song[];
+        let targetIdx: number;
+
+        if (shuffleEnabled) {
+          const rest = shuffleArray(contextList.filter((s) => s.id !== song.id));
+          newQueue = [song, ...rest];
+          targetIdx = 0;
+        } else {
+          newQueue = [...contextList];
+          targetIdx = contextList.findIndex((s) => s.id === song.id);
+          if (targetIdx < 0) targetIdx = 0;
+        }
+
+        artworkMap.current = buildArtworkSequence(newQueue, imagePoolRef.current);
+        await TrackPlayer.reset();
+        await TrackPlayer.add(newQueue.map(songToTrack));
+        if (targetIdx > 0) await TrackPlayer.skip(targetIdx);
+        await TrackPlayer.play();
+        setQueue(newQueue);
+        setCurrentIndex(targetIdx);
+        await AsyncStorage.multiSet([
+          [STORAGE_KEYS.QUEUE, JSON.stringify(newQueue)],
+          [STORAGE_KEYS.CURRENT_INDEX, String(targetIdx)],
+        ]);
+      } catch (e) {
+        console.error("playFromContext error", e);
+      }
+    },
+    [shuffleEnabled],
+  );
+
   // ── Playback controls ─────────────────────────────────────────────────────
   const togglePlayPause = useCallback(async () => {
     if (isPlaying) await TrackPlayer.pause();
@@ -770,6 +855,7 @@ const [MusicContextProvider, useMusicContext] = createContextHook(() => {
     resetSetup,
     playSong,
     playSongFromLibrary,
+    playFromContext,
     togglePlayPause,
     playNext,
     playPrev,
