@@ -494,7 +494,7 @@ export default function PlayerScreen() {
             style={styles.artEditBtnWrap}
             onPress={() => {
               Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-              router.push({ pathname: "/(tabs)/images", params: { mode: "assign" } });
+              router.push("/(tabs)/images");
             }}
             activeOpacity={0.8}
             hitSlop={14}
