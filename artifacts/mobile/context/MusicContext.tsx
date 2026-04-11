@@ -52,7 +52,9 @@ class ArtworkResolver {
 
   assign(songId: string, uri: string) {
     this.map.set(songId, uri);
-    this.lastResolved = uri;
+    // NOTE: intentionally do NOT set this.lastResolved here.
+    // Manual assignments must not poison the adjacent-no-repeat
+    // random sequence used for other songs.
   }
 
   reRoll(songId: string): string | null {
@@ -343,6 +345,11 @@ const [MusicContextProvider, useMusicContext] = createContextHook(() => {
   const imagePoolRef = useRef<string[]>([]);
   useEffect(() => { imagePoolRef.current = imagePool; }, [imagePool]);
 
+  // Set to true by explicit play actions (buildAndPlay, toggleShuffle) so the
+  // reactive artwork useEffect skips its own resolve() call and avoids calling
+  // resolver.resolve() twice for the same song change.
+  const artworkSetManually = useRef(false);
+
   const artworkFetchedFor = useRef<string>("");
 
   const playbackState = usePlaybackState();
@@ -369,6 +376,13 @@ const [MusicContextProvider, useMusicContext] = createContextHook(() => {
     if (!currentSong) return;
     const pool = imagePoolRef.current;
     if (!pool.length) return;
+
+    // Skip if a play action already set artwork manually — consume the flag.
+    if (artworkSetManually.current) {
+      artworkSetManually.current = false;
+      return;
+    }
+
     const uri = resolver.resolve(currentSong.id);
     setCurrentArtworkUri(uri);
     saveArtworkMap();
@@ -480,27 +494,44 @@ const [MusicContextProvider, useMusicContext] = createContextHook(() => {
           a.title.localeCompare(b.title, undefined, { sensitivity: "base" }),
         );
 
+        // Validate audio URIs are still accessible (Android content:// can expire
+        // after process kill on Android 10+ Scoped Storage).
+        const validatedSongs = await Promise.all(
+          parsed.map(async (song) => {
+            if (!song.uri.startsWith("content://")) return song;
+            const info = await FileSystem.getInfoAsync(song.uri).catch(() => ({ exists: false }));
+            return info.exists ? song : null;
+          }),
+        );
+        const liveSongs = validatedSongs.filter((s): s is Song => s !== null);
+
+        // If some songs were pruned, persist the cleaned list
+        if (liveSongs.length !== parsed.length) {
+          await AsyncStorage.setItem(STORAGE_KEYS.SONGS, JSON.stringify(liveSongs));
+          await AsyncStorage.setItem(STORAGE_KEYS.QUEUE, JSON.stringify(liveSongs));
+        }
+
         // Always restore in original (unshuffled) order.
         // Try to resume from the same song — find it in the original order.
-        const prevQ: Song[] = savedQueue ? JSON.parse(savedQueue) : parsed;
+        const prevQ: Song[] = savedQueue ? JSON.parse(savedQueue) : liveSongs;
         const prevIdx = savedIndex ? parseInt(savedIndex, 10) : 0;
         const prevSong = prevQ[prevIdx] ?? null;
         const idx = prevSong
-          ? Math.max(0, parsed.findIndex((s) => s.uri === prevSong.uri))
+          ? Math.max(0, liveSongs.findIndex((s) => s.uri === prevSong.uri))
           : 0;
 
-        setSongs(parsed);
-        setQueue(parsed);
+        setSongs(liveSongs);
+        setQueue(liveSongs);
         setCurrentIndex(idx);
 
         // Persist corrected state so next restart also uses original order
         await AsyncStorage.multiSet([
-          [STORAGE_KEYS.QUEUE, JSON.stringify(parsed)],
+          [STORAGE_KEYS.QUEUE, JSON.stringify(liveSongs)],
           [STORAGE_KEYS.CURRENT_INDEX, String(idx)],
           [STORAGE_KEYS.SHUFFLE, "false"],
         ]);
 
-        const tracks = parsed.map(songToTrack);
+        const tracks = liveSongs.map(songToTrack);
         await TrackPlayer.setQueue(tracks);
         if (idx > 0 && idx < tracks.length) await TrackPlayer.skip(idx);
         setIsSetupDone(true);
@@ -653,6 +684,7 @@ const [MusicContextProvider, useMusicContext] = createContextHook(() => {
         targetIdx = sourceList.findIndex((s) => s.id === song.id);
         if (targetIdx < 0) targetIdx = 0;
       }
+      artworkSetManually.current = true;
       const art = resolver.resolve(song.id);
       setCurrentArtworkUri(art);
       saveArtworkMap();
@@ -724,6 +756,7 @@ const [MusicContextProvider, useMusicContext] = createContextHook(() => {
 
     const firstSong = newOrder[0];
     if (firstSong) {
+      artworkSetManually.current = true;
       const art = resolver.resolve(firstSong.id);
       setCurrentArtworkUri(art);
       saveArtworkMap();

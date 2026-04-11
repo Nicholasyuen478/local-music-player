@@ -1,0 +1,172 @@
+This is a deep dive across three angles. Here is the complete analysis:
+
+***
+
+## Angle 1 — Android URI Expiry (The Most Likely Root Cause)
+
+This is almost certainly the **primary bug**. Android has two types of URIs and they behave completely differently:
+
+**`content://` URIs (from `expo-media-library` / `scanDeviceAudio`):**
+- These are the URIs returned when you scan the device with `MediaLibrary.getAssetsAsync()` [github](https://github.com/expo/expo/issues/18569)
+- On **Android 10+ with Scoped Storage**, `content://media/external/audio/...` URIs require an active, granted permission to read [stackoverflow](https://stackoverflow.com/questions/68854633/android-uri-permissions-expiry)
+- The permission is **process-scoped** — it is valid while your app process is alive, but after the app is fully killed and restarted, the OS may revoke it silently [commonsware](https://commonsware.com/blog/2020/08/08/uri-access-lifetime-still-shorter-than-you-might-think.html)
+- On **Android 11+**, the OS caps URI permission grants at **512** — if you scan 500+ songs, you can silently hit this limit [stackoverflow](https://stackoverflow.com/questions/68854633/android-uri-permissions-expiry)
+
+**`file://` URIs (from `copyToPermanent` / `expo-file-system`):**
+- These are stable and permanent ✅
+- Stored in `FileSystem.documentDirectory` which is private to your app and never cleaned by the OS
+
+**What happens in your app:**
+```
+Song URI stored:  content://media/external/audio/media/12345   ← VOLATILE
+Artwork URI stored: file:///data/user/0/.../artwork/artwork_xxx.jpg  ← STABLE
+```
+
+The song *plays* via `react-native-track-player` which may handle `content://` internally via Android's `MediaPlayer`, but the **artwork display** (via `<Image source={{ uri: artworkUri }}>`) uses expo-image which reads the file directly and will fail if the URI permission expired.
+
+***
+
+## Angle 2 — The Assign Logic Bug
+
+Looking at the `ArtworkResolver.resolve()` method there is a subtle but critical bug when the **image pool contains only 1 image**:
+
+```typescript
+resolve(songId: string): string | null {
+  const candidates = this.pool.filter((u) => u !== this.lastResolved);
+  const available = candidates.length > 0 ? candidates : this.pool;
+  // ↑ If pool has 1 image, candidates = [], available = [that 1 image]
+  // This is fine — BUT:
+
+  const existing = this.map.get(songId);
+  if (existing && this.pool.includes(existing)) {
+    this.lastResolved = existing;  // ← lastResolved is set to the only image
+    return existing;               // ← next song will exclude it, fallback to pool[0]
+  }
+  // ↑ This path is fine too, BUT...
+}
+```
+
+The real assign bug is in **`addImagesToPool`** — when the user adds images from the Gallery screen, `uris[uris.length - 1]` (the last added image) is blindly assigned to `currentSong`. But at this point `currentSong` in the closure may be **stale** if the song changed between when the user opened the Gallery and when they confirmed the selection.
+
+The second assign bug: **`resolver.assign()` sets `lastResolved`** — this means after a manual assignment, the *next* song will always exclude that manually chosen image. So if you have 2 images and manually pick image A for song 1, song 2 will always get image B, song 3 will always get image A again — perfectly alternating, never random.
+
+***
+
+## Angle 3 — The Shuffle Logic Bug
+
+In `toggleShuffle`, after building `newOrder`, the code does:
+
+```typescript
+const firstSong = newOrder[0];
+if (firstSong) {
+  const art = resolver.resolve(firstSong.id);  // ← resolver resolves song[0]
+  setCurrentArtworkUri(art);
+}
+
+await TrackPlayer.setQueue(newOrder.map(songToTrack));
+await TrackPlayer.skip(0);  // ← goes to index 0
+setQueue(newOrder);
+setCurrentIndex(0);
+```
+
+The bug here is: `setQueue(newOrder)` is async (React batch), but `TrackPlayer.skip(0)` fires immediately and triggers `activeTrack` to change, which fires the `useEffect` watching `activeTrack?.id`. That effect calls `setCurrentIndex` again → triggers the `currentSong?.id` artwork effect → calls `resolver.resolve()` a **second time**. Since `lastResolved` was already set by the first call, the second call may return the same image or behave inconsistently.
+
+***
+
+## The Fix Message for Replit
+
+```
+There are 3 bugs causing artwork to disappear or show wrong images.
+Please apply all fixes below.
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+FIX 1 — Android content:// URI validation on startup
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+In MusicContext.tsx, inside `loadPersistedData`, after parsing
+`cachedSongs` and before calling `TrackPlayer.setQueue`, add a
+validation step that removes songs whose URIs are no longer
+accessible. This catches Android Scoped Storage permission expiry:
+
+  // Validate audio URIs are still accessible (Android content:// can expire)
+  const validatedSongs = await Promise.all(
+    parsed.map(async (song) => {
+      if (!song.uri.startsWith("content://")) return song;
+      const info = await FileSystem.getInfoAsync(song.uri).catch(() => ({ exists: false }));
+      return info.exists ? song : null;
+    }),
+  );
+  const liveSongs = validatedSongs.filter((s): s is Song => s !== null);
+
+  // If some songs were pruned, persist the cleaned list
+  if (liveSongs.length !== parsed.length) {
+    await AsyncStorage.setItem(STORAGE_KEYS.SONGS, JSON.stringify(liveSongs));
+    await AsyncStorage.setItem(STORAGE_KEYS.QUEUE, JSON.stringify(liveSongs));
+  }
+
+Then use `liveSongs` instead of `parsed` for all subsequent logic
+(setSongs, setQueue, TrackPlayer.setQueue, etc.).
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+FIX 2 — ArtworkResolver: don't set lastResolved on assign()
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+In the ArtworkResolver class, change assign() so it does NOT
+update lastResolved. Manual picks should not affect the
+random sequence for other songs:
+
+  assign(songId: string, uri: string) {
+    this.map.set(songId, uri);
+    // NOTE: intentionally do NOT set this.lastResolved here.
+    // Manual assignments must not poison the adjacent-no-repeat
+    // random sequence used for other songs.
+  }
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+FIX 3 — Shuffle: guard against double artwork resolution
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+In toggleShuffle, the artwork effect fires twice: once from our
+explicit setCurrentArtworkUri call, and once from the activeTrack
+useEffect when TrackPlayer.skip(0) triggers. Add a guard ref to
+skip the effect-driven resolution when we've already set it manually.
+
+Add this ref near the top of the context hook alongside other refs:
+  const artworkSetManually = useRef(false);
+
+In toggleShuffle, set the flag BEFORE calling setCurrentArtworkUri:
+  if (firstSong) {
+    artworkSetManually.current = true;   // ← ADD THIS LINE
+    const art = resolver.resolve(firstSong.id);
+    setCurrentArtworkUri(art);
+    saveArtworkMap();
+  }
+
+Do the same in buildAndPlay (used by playSongFromLibrary and
+playFromContext), before the setCurrentArtworkUri call:
+  artworkSetManually.current = true;   // ← ADD THIS LINE
+  const art = resolver.resolve(song.id);
+  setCurrentArtworkUri(art);
+
+In the artwork useEffect (deps: [currentSong?.id, imagePool]),
+add a guard at the top to skip if manually set:
+  useEffect(() => {
+    if (!currentSong) return;
+    const pool = imagePoolRef.current;
+    if (!pool.length) return;
+
+    // Skip if the artwork was already set manually by a play action
+    if (artworkSetManually.current) {
+      artworkSetManually.current = false;  // consume the flag
+      return;
+    }
+
+    const uri = resolver.resolve(currentSong.id);
+    setCurrentArtworkUri(uri);
+    saveArtworkMap();
+  }, [currentSong?.id, imagePool]);
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+Do not change anything else.
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+```
