@@ -684,15 +684,19 @@ const [MusicContextProvider, useMusicContext] = createContextHook(() => {
 
         artworkMap.current = buildArtworkSequence(newQueue, imagePoolRef.current, artworkMap.current);
         saveArtworkMap();
-        // Push artwork immediately so the player never shows a blank frame
-        setCurrentArtworkUri(
-          artworkMap.current.get(newQueue[targetIdx].id) ?? imagePoolRef.current[0] ?? null,
-        );
+        // Capture the resolved artwork URI for this song before any awaits.
+        const resolvedArt =
+          artworkMap.current.get(newQueue[targetIdx].id) ?? imagePoolRef.current[0] ?? null;
+        // Push artwork immediately so the player never shows a blank frame.
+        setCurrentArtworkUri(resolvedArt);
         await TrackPlayer.setQueue(newQueue.map(songToTrack));
         if (targetIdx > 0) await TrackPlayer.skip(targetIdx);
         await TrackPlayer.play();
+        // Re-apply after queue/index settle so any intermediate activeTrack
+        // effect firing with stale state cannot clobber the correct artwork.
         setQueue(newQueue);
         setCurrentIndex(targetIdx);
+        setCurrentArtworkUri(resolvedArt);
         await AsyncStorage.multiSet([
           [STORAGE_KEYS.QUEUE, JSON.stringify(newQueue)],
           [STORAGE_KEYS.CURRENT_INDEX, String(targetIdx)],
@@ -726,16 +730,20 @@ const [MusicContextProvider, useMusicContext] = createContextHook(() => {
 
         artworkMap.current = buildArtworkSequence(newQueue, imagePoolRef.current, artworkMap.current);
         saveArtworkMap();
-        // Push artwork immediately so the player never shows a blank frame
-        setCurrentArtworkUri(
-          artworkMap.current.get(newQueue[targetIdx].id) ?? imagePoolRef.current[0] ?? null,
-        );
+        // Capture the resolved artwork URI for this song before any awaits.
+        const resolvedArt =
+          artworkMap.current.get(newQueue[targetIdx].id) ?? imagePoolRef.current[0] ?? null;
+        // Push artwork immediately so the player never shows a blank frame.
+        setCurrentArtworkUri(resolvedArt);
         await TrackPlayer.reset();
         await TrackPlayer.add(newQueue.map(songToTrack));
         if (targetIdx > 0) await TrackPlayer.skip(targetIdx);
         await TrackPlayer.play();
+        // Re-apply after queue/index settle so any intermediate activeTrack
+        // effect firing with stale state cannot clobber the correct artwork.
         setQueue(newQueue);
         setCurrentIndex(targetIdx);
+        setCurrentArtworkUri(resolvedArt);
         await AsyncStorage.multiSet([
           [STORAGE_KEYS.QUEUE, JSON.stringify(newQueue)],
           [STORAGE_KEYS.CURRENT_INDEX, String(targetIdx)],
@@ -782,14 +790,15 @@ const [MusicContextProvider, useMusicContext] = createContextHook(() => {
 
     artworkMap.current = buildArtworkSequence(newOrder, imagePoolRef.current, artworkMap.current);
     saveArtworkMap();
-    setCurrentArtworkUri(
-      artworkMap.current.get(newOrder[0]?.id ?? "") ?? imagePoolRef.current[0] ?? null,
-    );
+    const resolvedArt =
+      artworkMap.current.get(newOrder[0]?.id ?? "") ?? imagePoolRef.current[0] ?? null;
+    setCurrentArtworkUri(resolvedArt);
 
     await TrackPlayer.setQueue(newOrder.map(songToTrack));
     await TrackPlayer.skip(0);
     setQueue(newOrder);
     setCurrentIndex(0);
+    setCurrentArtworkUri(resolvedArt);
     await AsyncStorage.multiSet([
       [STORAGE_KEYS.QUEUE, JSON.stringify(newOrder)],
       [STORAGE_KEYS.CURRENT_INDEX, "0"],

@@ -67,6 +67,13 @@ export default function PlayerScreen() {
     seekTo,
   } = useMusicContext();
 
+  // Keep the last non-null artwork URI so the player never flashes the blank
+  // placeholder during the brief window between a song change and the artwork
+  // effect settling on the correct image for the new track.
+  const persistedArtUri = useRef<string | null>(null);
+  if (currentArtworkUri) persistedArtUri.current = currentArtworkUri;
+  const displayArtworkUri = currentArtworkUri ?? persistedArtUri.current;
+
   const isFavorite = currentSong ? favorites.includes(currentSong.uri) : false;
 
   const handleToggleFavorite = useCallback(() => {
@@ -394,9 +401,9 @@ export default function PlayerScreen() {
     <View style={[styles.container, { paddingTop: topInset }]}>
 
       {/* ── Ambient blurred artwork background ── */}
-      {currentArtworkUri && (
+      {displayArtworkUri && (
         <Image
-          source={{ uri: currentArtworkUri }}
+          source={{ uri: displayArtworkUri }}
           style={StyleSheet.absoluteFillObject}
           contentFit="cover"
         />
@@ -484,7 +491,7 @@ export default function PlayerScreen() {
           {...panResponder.panHandlers}
         >
           <SongArtwork
-            artworkUri={currentArtworkUri}
+            artworkUri={displayArtworkUri}
             size={playerArtSize}
             borderRadius={24}
           />
