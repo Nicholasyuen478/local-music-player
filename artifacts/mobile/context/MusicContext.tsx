@@ -28,6 +28,7 @@ import { getDefaultArtworkUris } from "@/constants/defaultArtworks";
 function buildArtworkSequence(
   queue: Song[],
   pool: string[],
+  existing?: Map<string, string>,
 ): Map<string, string> {
   const map = new Map<string, string>();
   if (!pool.length || !queue.length) return map;
@@ -35,6 +36,13 @@ function buildArtworkSequence(
   let lastUri: string | null = null;
 
   for (const song of queue) {
+    // Preserve any existing valid assignment so custom artwork is never lost
+    const prior = existing?.get(song.id);
+    if (prior && pool.includes(prior)) {
+      map.set(song.id, prior);
+      lastUri = prior;
+      continue;
+    }
     // Exclude the last assigned image so adjacent songs differ
     const candidates = pool.filter((u) => u !== lastUri);
     // If only 1 image in pool, candidates will be empty — fall back to full pool
@@ -541,8 +549,8 @@ const [MusicContextProvider, useMusicContext] = createContextHook(() => {
       });
       await new Promise<void>((r) => setTimeout(r, 50));
 
-      // Pre-build artwork sequence for the full merged queue
-      artworkMap.current = buildArtworkSequence(merged, imagePoolRef.current);
+      // Pre-build artwork sequence for the full merged queue (preserve existing)
+      artworkMap.current = buildArtworkSequence(merged, imagePoolRef.current, artworkMap.current);
 
       const tracks = merged.map(songToTrack);
       await TrackPlayer.setQueue(tracks);
@@ -667,8 +675,12 @@ const [MusicContextProvider, useMusicContext] = createContextHook(() => {
           if (targetIdx < 0) targetIdx = 0;
         }
 
-        artworkMap.current = buildArtworkSequence(newQueue, imagePoolRef.current);
+        artworkMap.current = buildArtworkSequence(newQueue, imagePoolRef.current, artworkMap.current);
         saveArtworkMap();
+        // Push artwork immediately so the player never shows a blank frame
+        setCurrentArtworkUri(
+          artworkMap.current.get(newQueue[targetIdx].id) ?? imagePoolRef.current[0] ?? null,
+        );
         await TrackPlayer.setQueue(newQueue.map(songToTrack));
         if (targetIdx > 0) await TrackPlayer.skip(targetIdx);
         await TrackPlayer.play();
@@ -705,8 +717,12 @@ const [MusicContextProvider, useMusicContext] = createContextHook(() => {
           if (targetIdx < 0) targetIdx = 0;
         }
 
-        artworkMap.current = buildArtworkSequence(newQueue, imagePoolRef.current);
+        artworkMap.current = buildArtworkSequence(newQueue, imagePoolRef.current, artworkMap.current);
         saveArtworkMap();
+        // Push artwork immediately so the player never shows a blank frame
+        setCurrentArtworkUri(
+          artworkMap.current.get(newQueue[targetIdx].id) ?? imagePoolRef.current[0] ?? null,
+        );
         await TrackPlayer.reset();
         await TrackPlayer.add(newQueue.map(songToTrack));
         if (targetIdx > 0) await TrackPlayer.skip(targetIdx);
@@ -757,8 +773,11 @@ const [MusicContextProvider, useMusicContext] = createContextHook(() => {
 
     const newOrder = next ? shuffleArray(contextSongs) : [...contextSongs];
 
-    artworkMap.current = buildArtworkSequence(newOrder, imagePoolRef.current);
+    artworkMap.current = buildArtworkSequence(newOrder, imagePoolRef.current, artworkMap.current);
     saveArtworkMap();
+    setCurrentArtworkUri(
+      artworkMap.current.get(newOrder[0]?.id ?? "") ?? imagePoolRef.current[0] ?? null,
+    );
 
     await TrackPlayer.setQueue(newOrder.map(songToTrack));
     await TrackPlayer.skip(0);

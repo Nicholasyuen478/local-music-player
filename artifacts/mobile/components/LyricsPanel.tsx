@@ -31,6 +31,7 @@ function parseLrc(lrc: string): LrcLine[] {
 type Source = "lrclib" | "netease" | "qqmusic";
 type LyricData = { lrcLines: LrcLine[]; plain: string };
 type FetchStatus = "idle" | "loading" | "done" | "empty" | "no-network";
+type SearchCombo = { title: string; artist: string };
 
 // ── Session-level caches (cleared on app restart) ─────────────────────────────
 const lyricsCache = new Map<string, LyricData | null>();
@@ -98,7 +99,6 @@ async function fetchNetease(
   if (lrcRaw) {
     const lrcLines = parseLrc(lrcRaw);
     if (lrcLines.length) return { lrcLines, plain: "" };
-    // Has lyric block but no timestamps — treat as plain
     const plain = lrcRaw.replace(/\[[^\]]*\]/g, "").replace(/\n{3,}/g, "\n\n").trim();
     if (plain) return { lrcLines: [], plain };
   }
@@ -132,7 +132,6 @@ async function fetchQQMusic(
   if (!lyricsR.ok) return null;
   const lyricsD = await lyricsR.json() as any;
 
-  // QQ Music lyrics are base64-encoded
   const b64: string | undefined = lyricsD?.lyric;
   if (!b64) return null;
 
@@ -157,9 +156,16 @@ async function fetchSource(
 }
 
 // ── Component ─────────────────────────────────────────────────────────────────
-type Props = { title: string; artist: string; trackId: string; position: number };
+type Props = {
+  filename: string;
+  nativeTitle: string | null;
+  nativeArtist: string | null;
+  trackId: string;
+  position: number;
+  onMetaResolved?: (title: string, artist: string) => void;
+};
 
-export function LyricsPanel({ title, artist, trackId, position }: Props) {
+export function LyricsPanel({ filename, nativeTitle, nativeArtist, trackId, position, onMetaResolved }: Props) {
   const [source,      setSource]      = useState<Source>(() => songSourceMap.get(trackId) ?? "lrclib");
   const [fetchStatus, setFetchStatus] = useState<FetchStatus>("idle");
   const [lyricData,   setLyricData]   = useState<LyricData | null>(null);
@@ -170,43 +176,94 @@ export function LyricsPanel({ title, artist, trackId, position }: Props) {
     setSource(songSourceMap.get(trackId) ?? "lrclib");
   }, [trackId]);
 
+  // ── Build ordered search combos ────────────────────────────────────────────
+  // Priority:
+  //   1. TrackPlayer event title + artist
+  //   2. Filename parsed as %title%-%artist% (first dash = separator)
+  //   3. Filename parsed as %artist%-%title% (reversed)
+  //   4. Entire filename (no extension) as title only
+  const searchCombos = useMemo<SearchCombo[]>(() => {
+    const noExt = filename.replace(/\.[^/.]+$/, "").trim();
+    const result: SearchCombo[] = [];
+    const seen = new Set<string>();
+
+    const push = (title: string, artist: string) => {
+      const key = `${title}\x00${artist}`;
+      if (!title || seen.has(key)) return;
+      seen.add(key);
+      result.push({ title, artist });
+    };
+
+    // 1. Native ID3 / TrackPlayer event
+    if (nativeTitle) {
+      push(nativeTitle.trim(), (nativeArtist ?? "").trim());
+    }
+
+    // 2. %title%-%artist%
+    const dash = noExt.indexOf("-");
+    if (dash > 0) {
+      push(noExt.slice(0, dash).trim(), noExt.slice(dash + 1).trim());
+    }
+
+    // 3. %artist%-%title% (swap left/right)
+    if (dash > 0) {
+      push(noExt.slice(dash + 1).trim(), noExt.slice(0, dash).trim());
+    }
+
+    // 4. Filename as title, no artist
+    push(noExt, "");
+
+    return result;
+  }, [filename, nativeTitle, nativeArtist]);
+
+  const onMetaResolvedRef = useRef(onMetaResolved);
+  useEffect(() => { onMetaResolvedRef.current = onMetaResolved; }, [onMetaResolved]);
+
   const doFetch = useCallback(
     async (src: Source, signal: AbortSignal) => {
-      if (!title) { setFetchStatus("idle"); return; }
+      if (!searchCombos.length) { setFetchStatus("idle"); return; }
 
       const net = await NetInfo.fetch();
       if (!net.isConnected) { setFetchStatus("no-network"); return; }
-
-      const cacheKey = `${title}\x00${artist}\x00${src}`;
-      if (lyricsCache.has(cacheKey)) {
-        const cached = lyricsCache.get(cacheKey) ?? null;
-        setLyricData(cached);
-        setFetchStatus(cached ? "done" : "empty");
-        return;
-      }
 
       setFetchStatus("loading");
       setLyricData(null);
       lineY.current.clear();
 
       try {
-        const result = await fetchSource(src, title, artist, signal);
-        if (signal.aborted) return;
-        lyricsCache.set(cacheKey, result);
-        setLyricData(result);
-        setFetchStatus(result ? "done" : "empty");
+        for (const combo of searchCombos) {
+          const cacheKey = `${combo.title}\x00${combo.artist}\x00${src}`;
+          let result: LyricData | null = null;
+
+          if (lyricsCache.has(cacheKey)) {
+            result = lyricsCache.get(cacheKey) ?? null;
+          } else {
+            result = await fetchSource(src, combo.title, combo.artist, signal);
+            if (signal.aborted) return;
+            lyricsCache.set(cacheKey, result);
+          }
+
+          if (result) {
+            setLyricData(result);
+            setFetchStatus("done");
+            onMetaResolvedRef.current?.(combo.title, combo.artist);
+            return;
+          }
+        }
+
+        setFetchStatus("empty");
       } catch {
         if (!signal.aborted) setFetchStatus("empty");
       }
     },
-    [title, artist],
+    [searchCombos],
   );
 
   useEffect(() => {
     const ctrl = new AbortController();
     doFetch(source, ctrl.signal);
     return () => ctrl.abort();
-  }, [title, artist, source, doFetch]);
+  }, [source, doFetch]);
 
   const handleSourceChange = useCallback(
     (src: Source) => {

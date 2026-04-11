@@ -76,37 +76,44 @@ export default function PlayerScreen() {
   }, [currentSong, toggleFavorite]);
 
   // ── Native ID3 metadata (from react-native-track-player) ──────────────
-  // Overrides the filename-parsed title/artist when the native player
-  // extracts real embedded tags from the audio file.
-  const [nativeMeta, setNativeMeta] = useState<{ title: string; artist: string } | null>(null);
+  // Raw tags emitted by the audio engine for the currently playing file.
+  const [nativeMeta, setNativeMeta] = useState<{ title: string; artist: string | null } | null>(null);
 
-  // Clear native meta on every track change — stale tags from the
-  // previous file must not bleed into the new track's lyrics search.
+  // ── Lyrics-resolved metadata ────────────────────────────────────────────
+  // The title+artist combo that successfully found lyrics — becomes the
+  // highest-priority display label once lyrics are located.
+  const [lyricsFoundMeta, setLyricsFoundMeta] = useState<{ title: string; artist: string } | null>(null);
+
+  // Clear both on every track change — stale metadata must not bleed
+  // into the new track's display or lyrics search.
   useEffect(() => {
     setNativeMeta(null);
+    setLyricsFoundMeta(null);
   }, [currentSong?.id]);
 
   // Listen for native ID3 / common metadata emitted by the audio engine.
-  // When real tags arrive they take priority over the filename-parsed fallback.
   useTrackPlayerEvents([Event.MetadataCommonReceived], (event) => {
     const { title, artist } = event.metadata ?? {};
-    if (title && artist) {
-      setNativeMeta({ title, artist });
-    } else if (title) {
-      // Artist absent in tags — keep the filename-parsed artist as fallback
-      setNativeMeta({ title, artist: currentSong?.artist ?? "" });
+    if (title) {
+      setNativeMeta({ title, artist: artist ?? null });
     }
   });
 
   // ── Resolved title/artist ──────────────────────────────────────────────
-  // Priority: native ID3 tags → filename parse → hard fallback
-  // If no ID3 metadata arrives, show the filename (no extension) as title
-  // and "Unknown Artist" so the UI is never empty.
-  const filenameTitle = currentSong
-    ? currentSong.filename.replace(/\.[^/.]+$/, "")
-    : "";
-  const displayTitle  = nativeMeta?.title  ?? (currentSong ? filenameTitle  : "");
-  const displayArtist = nativeMeta?.artist ?? (currentSong ? (currentSong.artist || "Unknown Artist") : "");
+  // Priority:
+  //   1. Combo that found lyrics (most accurate for the content)
+  //   2. Native ID3 / TrackPlayer event tags
+  //   3. Filename parsed as %title%-%artist% (first dash = separator)
+  //   4. Entire filename without extension as title
+  //   5. "Unknown Artist" if no artist resolved
+  const filenameNoExt = currentSong?.filename.replace(/\.[^/.]+$/, "").trim() ?? "";
+  const dashIdx = filenameNoExt.indexOf("-");
+  const filenameParsedTitle  = dashIdx > 0 ? filenameNoExt.slice(0, dashIdx).trim() : filenameNoExt;
+  const filenameParsedArtist = dashIdx > 0 ? filenameNoExt.slice(dashIdx + 1).trim() : "";
+
+  const displayTitle  = lyricsFoundMeta?.title  ?? nativeMeta?.title  ?? filenameParsedTitle;
+  const rawArtist     = lyricsFoundMeta?.artist || nativeMeta?.artist || filenameParsedArtist;
+  const displayArtist = currentSong ? (rawArtist || "Unknown Artist") : "";
 
   // ── Artwork size: hero element — 88% of screen width ──────────────────
   const playerArtSize = Math.min(
@@ -614,10 +621,12 @@ export default function PlayerScreen() {
 
           {currentSong ? (
             <LyricsPanel
-              title={displayTitle}
-              artist={displayArtist}
+              filename={currentSong.filename}
+              nativeTitle={nativeMeta?.title ?? null}
+              nativeArtist={nativeMeta?.artist ?? null}
               trackId={currentSong.id}
               position={status.currentTime ?? 0}
+              onMetaResolved={(t, a) => setLyricsFoundMeta({ title: t, artist: a })}
             />
           ) : (
             <View style={{ flex: 1, alignItems: "center", justifyContent: "center" }}>
