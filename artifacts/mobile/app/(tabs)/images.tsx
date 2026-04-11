@@ -1,7 +1,7 @@
 import * as Haptics from "expo-haptics";
 import { Image } from "expo-image";
-import { router, useFocusEffect } from "expo-router";
-import { ChevronLeft, ImageIcon, Plus, Scissors, X } from "lucide-react-native";
+import { router, useFocusEffect, useLocalSearchParams } from "expo-router";
+import { Check, ChevronLeft, ImageIcon, Plus, Scissors, X } from "lucide-react-native";
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import {
   ActivityIndicator,
@@ -90,11 +90,15 @@ function ThumbImg({ uri, size }: ThumbImgProps) {
 export default function ImagesScreen() {
   const { topInset, bottomInset, tabBarH, isCompact } = useLayout();
   const { width } = useWindowDimensions();
+  const { mode } = useLocalSearchParams<{ mode?: string }>();
+  const isAssignMode = mode === "assign";
   const {
     imagePool,
+    currentArtworkUri,
     pickImageFolder,
     removeImageFromPool,
     cropImageInPool,
+    assignArtwork,
   } = useMusicContext();
 
   const thumbSize = Math.floor((width - GAP * (COLUMNS + 1)) / COLUMNS);
@@ -181,11 +185,22 @@ export default function ImagesScreen() {
         </TouchableOpacity>
 
         <Text style={styles.headerCount}>
-          {imagePool.length > 0 ? `${imagePool.length} images` : "Artwork vault"}
+          {isAssignMode
+            ? "Select Artwork"
+            : imagePool.length > 0
+              ? `${imagePool.length} images`
+              : "Artwork vault"}
         </Text>
 
         <View style={{ width: 34 }} />
       </View>
+
+      {/* ── Assign-mode hint banner ── */}
+      {isAssignMode && imagePool.length > 0 && (
+        <View style={styles.assignBanner}>
+          <Text style={styles.assignBannerText}>Tap an image to set it as the artwork for the current song</Text>
+        </View>
+      )}
 
       {/* ── Grid or empty state ── */}
       {imagePool.length === 0 ? (
@@ -211,44 +226,70 @@ export default function ImagesScreen() {
           renderItem={({ item }) => {
             const isCropping = croppingUri === item;
             const canCrop    = isUserPickedUri(item);
+            const isActive   = item === currentArtworkUri;
 
             return (
-              <View style={[styles.thumb, { width: thumbSize, height: thumbSize }]}>
-
-                <ThumbImg uri={item} size={thumbSize} />
-
-                {/* Cropping spinner overlay */}
-                {isCropping && (
-                  <View style={styles.spinnerOverlay}>
-                    <ActivityIndicator size="small" color="#fff" />
-                  </View>
-                )}
-
-                {/* Crop — bottom-left, only for user-picked images */}
-                {canCrop && !isCropping && (
-                  <TouchableOpacity
-                    style={[styles.overlayBtn, styles.cropBtnPos]}
-                    onPress={() => handleCrop(item)}
-                    hitSlop={10}
-                  >
-                    <View style={styles.overlayBtnInner}>
-                      <Scissors size={11} color="#fff" />
-                    </View>
-                  </TouchableOpacity>
-                )}
-
-                {/* Remove — top-right */}
-                <TouchableOpacity
-                  style={[styles.overlayBtn, styles.removeBtnPos]}
-                  onPress={() => handleRemove(item)}
-                  hitSlop={10}
+              <TouchableOpacity
+                activeOpacity={isAssignMode ? 0.7 : 1}
+                onPress={() => {
+                  if (!isAssignMode) return;
+                  Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                  assignArtwork(item);
+                  router.navigate("/(tabs)");
+                }}
+              >
+                <View
+                  style={[
+                    styles.thumb,
+                    { width: thumbSize, height: thumbSize },
+                    isAssignMode && isActive && styles.thumbActive,
+                  ]}
                 >
-                  <View style={styles.overlayBtnInner}>
-                    <X size={11} color="#fff" />
-                  </View>
-                </TouchableOpacity>
 
-              </View>
+                  <ThumbImg uri={item} size={thumbSize} />
+
+                  {/* Active checkmark badge — assign mode only */}
+                  {isAssignMode && isActive && (
+                    <View style={styles.activeBadge}>
+                      <Check size={13} color="#fff" strokeWidth={3} />
+                    </View>
+                  )}
+
+                  {/* Cropping spinner overlay */}
+                  {isCropping && (
+                    <View style={styles.spinnerOverlay}>
+                      <ActivityIndicator size="small" color="#fff" />
+                    </View>
+                  )}
+
+                  {/* Crop — bottom-left, only for user-picked images (hidden in assign mode) */}
+                  {!isAssignMode && canCrop && !isCropping && (
+                    <TouchableOpacity
+                      style={[styles.overlayBtn, styles.cropBtnPos]}
+                      onPress={() => handleCrop(item)}
+                      hitSlop={10}
+                    >
+                      <View style={styles.overlayBtnInner}>
+                        <Scissors size={11} color="#fff" />
+                      </View>
+                    </TouchableOpacity>
+                  )}
+
+                  {/* Remove — top-right (hidden in assign mode) */}
+                  {!isAssignMode && (
+                    <TouchableOpacity
+                      style={[styles.overlayBtn, styles.removeBtnPos]}
+                      onPress={() => handleRemove(item)}
+                      hitSlop={10}
+                    >
+                      <View style={styles.overlayBtnInner}>
+                        <X size={11} color="#fff" />
+                      </View>
+                    </TouchableOpacity>
+                  )}
+
+                </View>
+              </TouchableOpacity>
             );
           }}
         />
@@ -307,7 +348,41 @@ const styles = StyleSheet.create({
     backgroundColor: Colors.dark.surface,
     position: "relative",
   },
+  thumbActive: {
+    borderWidth: 2.5,
+    borderColor: Colors.dark.accent,
+  },
+  activeBadge: {
+    position: "absolute",
+    bottom: 7,
+    left: 7,
+    width: 24,
+    height: 24,
+    borderRadius: 12,
+    backgroundColor: Colors.dark.accent,
+    alignItems: "center",
+    justifyContent: "center",
+  },
   thumbImg: { width: "100%", height: "100%" },
+
+  assignBanner: {
+    marginHorizontal: 16,
+    marginBottom: 10,
+    paddingVertical: 9,
+    paddingHorizontal: 14,
+    borderRadius: 10,
+    backgroundColor: "rgba(255,140,0,0.12)",
+    borderWidth: 1,
+    borderColor: "rgba(255,140,0,0.28)",
+    alignItems: "center",
+  },
+  assignBannerText: {
+    color: Colors.dark.accent,
+    fontSize: 12,
+    fontFamily: "Inter_400Regular",
+    textAlign: "center",
+    lineHeight: 17,
+  },
 
   failedThumb: {
     backgroundColor: Colors.dark.surfaceSecondary,

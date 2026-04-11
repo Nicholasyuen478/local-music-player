@@ -28,7 +28,7 @@ function parseLrc(lrc: string): LrcLine[] {
 }
 
 // ── Types ─────────────────────────────────────────────────────────────────────
-type Source = "lrclib" | "netease" | "qqmusic";
+type Source = "lrclib" | "netease" | "lyricsovh";
 type LyricData = { lrcLines: LrcLine[]; plain: string };
 type FetchStatus = "idle" | "loading" | "done" | "empty" | "no-network";
 type SearchCombo = { title: string; artist: string };
@@ -40,7 +40,7 @@ const songSourceMap = new Map<string, Source>();
 const SOURCE_LABELS: Record<Source, string> = {
   lrclib: "LRClib",
   netease: "Netease",
-  qqmusic: "QQ Music",
+  lyricsovh: "Lyrics.OVH",
 };
 
 // ── Fetchers ──────────────────────────────────────────────────────────────────
@@ -105,43 +105,22 @@ async function fetchNetease(
   return null;
 }
 
-async function fetchQQMusic(
+async function fetchLyricsOvh(
   title: string,
   artist: string,
   signal: AbortSignal,
 ): Promise<LyricData | null> {
-  const q = encodeURIComponent(`${title} ${artist}`);
-  const searchR = await fetch(
-    `https://c.y.qq.com/soso/fcgi-bin/client_search_cp` +
-    `?w=${q}&n=3&format=json&inCharset=utf8&outCharset=utf-8` +
-    `&platform=yqq.json&needNewCode=0&t=0`,
-    { signal, headers: { "Referer": "https://y.qq.com" } },
-  );
-  if (!searchR.ok) return null;
-  const searchD = await searchR.json() as any;
-
-  const songMid: string | undefined = searchD?.data?.song?.list?.[0]?.songmid;
-  if (!songMid) return null;
-
-  const lyricsR = await fetch(
-    `https://c.y.qq.com/lyric/fcgi-bin/fcg_query_lyric_new.fcg` +
-    `?songmid=${songMid}&g_tk=5381&format=json&inCharset=utf8` +
-    `&outCharset=utf-8&platform=yqq.json&needNewCode=0`,
-    { signal, headers: { "Referer": "https://y.qq.com" } },
-  );
-  if (!lyricsR.ok) return null;
-  const lyricsD = await lyricsR.json() as any;
-
-  const b64: string | undefined = lyricsD?.lyric;
-  if (!b64) return null;
-
-  let decoded: string;
-  try { decoded = atob(b64); } catch { return null; }
-
-  const lrcLines = parseLrc(decoded);
-  if (lrcLines.length) return { lrcLines, plain: "" };
-  const plain = decoded.replace(/\[[^\]]*\]/g, "").replace(/\n{3,}/g, "\n\n").trim();
-  return plain ? { lrcLines: [], plain } : null;
+  // lyrics.ovh requires both artist and title in the URL path
+  if (!artist) return null;
+  const url =
+    `https://api.lyrics.ovh/v1/${encodeURIComponent(artist)}/${encodeURIComponent(title)}`;
+  const r = await fetch(url, { signal });
+  if (!r.ok) return null;
+  const d = await r.json() as any;
+  const lyrics: string | undefined = d?.lyrics;
+  if (!lyrics?.trim()) return null;
+  // lyrics.ovh returns plain text only (no LRC timestamps)
+  return { lrcLines: [], plain: lyrics.trim() };
 }
 
 async function fetchSource(
@@ -150,9 +129,9 @@ async function fetchSource(
   artist: string,
   signal: AbortSignal,
 ): Promise<LyricData | null> {
-  if (source === "lrclib")  return fetchLrclib(title, artist, signal);
-  if (source === "netease") return fetchNetease(title, artist, signal);
-  return fetchQQMusic(title, artist, signal);
+  if (source === "lrclib")    return fetchLrclib(title, artist, signal);
+  if (source === "netease")   return fetchNetease(title, artist, signal);
+  return fetchLyricsOvh(title, artist, signal);
 }
 
 // ── Component ─────────────────────────────────────────────────────────────────
@@ -166,14 +145,20 @@ type Props = {
 };
 
 export function LyricsPanel({ filename, nativeTitle, nativeArtist, trackId, position, onMetaResolved }: Props) {
-  const [source,      setSource]      = useState<Source>(() => songSourceMap.get(trackId) ?? "lrclib");
+  const resolveSource = (id: string): Source => {
+    const saved = songSourceMap.get(id);
+    // Migrate stale "qqmusic" entries (source was removed)
+    if (saved === "qqmusic" as string || !saved) return "lrclib";
+    return saved as Source;
+  };
+  const [source,      setSource]      = useState<Source>(() => resolveSource(trackId));
   const [fetchStatus, setFetchStatus] = useState<FetchStatus>("idle");
   const [lyricData,   setLyricData]   = useState<LyricData | null>(null);
   const scrollRef = useRef<ScrollView>(null);
   const lineY     = useRef<Map<number, number>>(new Map());
 
   useEffect(() => {
-    setSource(songSourceMap.get(trackId) ?? "lrclib");
+    setSource(resolveSource(trackId));
   }, [trackId]);
 
   // ── Build ordered search combos ────────────────────────────────────────────
@@ -295,7 +280,7 @@ export function LyricsPanel({ filename, nativeTitle, nativeArtist, trackId, posi
   // ── Source selector ────────────────────────────────────────────────────────
   const sourceSelector = (
     <View style={styles.sourceRow}>
-      {(["lrclib", "netease", "qqmusic"] as Source[]).map((s) => (
+      {(["lrclib", "netease", "lyricsovh"] as Source[]).map((s) => (
         <TouchableOpacity
           key={s}
           style={[styles.sourceBtn, source === s && styles.sourceBtnActive]}

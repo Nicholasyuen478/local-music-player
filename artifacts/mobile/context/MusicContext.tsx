@@ -351,7 +351,11 @@ const [MusicContextProvider, useMusicContext] = createContextHook(() => {
   useEffect(() => {
     const pool = imagePoolRef.current;
     if (!pool.length || !currentSong) {
-      setCurrentArtworkUri(null);
+      // Guard: don't wipe artwork during intermediate renders where state
+      // updates haven't fully landed (e.g. setCurrentIndex fired before
+      // setQueue, leaving currentSong temporarily null). Explicit callers
+      // such as resetSetup and removeSongs clear currentArtworkUri when
+      // they genuinely want the player to show no artwork.
       return;
     }
 
@@ -511,8 +515,9 @@ const [MusicContextProvider, useMusicContext] = createContextHook(() => {
           [STORAGE_KEYS.SHUFFLE, "false"],
         ]);
 
-        // Pre-build artwork map for the original-order queue
-        artworkMap.current = buildArtworkSequence(parsed, resolvedPool);
+        // Pre-build artwork map — preserve saved song→image assignments loaded
+        // from AsyncStorage above; only fill in missing entries with new picks.
+        artworkMap.current = buildArtworkSequence(parsed, resolvedPool, artworkMap.current);
 
         const tracks = parsed.map(songToTrack);
         await TrackPlayer.setQueue(tracks);
@@ -591,6 +596,7 @@ const [MusicContextProvider, useMusicContext] = createContextHook(() => {
       if (newSongs.length === 0) {
         setIsSetupDone(false);
         artworkMap.current.clear();
+        setCurrentArtworkUri(null);
         await TrackPlayer.reset();
         await Promise.all([
           AsyncStorage.removeItem(STORAGE_KEYS.SONGS),
@@ -622,6 +628,7 @@ const [MusicContextProvider, useMusicContext] = createContextHook(() => {
       AsyncStorage.setItem(STORAGE_KEYS.SHUFFLE, "false"),
     ]);
     artworkMap.current.clear();
+    setCurrentArtworkUri(null);
     setIsSetupDone(false);
     setSongs([]);
     setQueue([]);
