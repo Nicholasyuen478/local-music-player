@@ -184,8 +184,7 @@ export default function ImagesScreen() {
           {imagePool.length > 0 ? `${imagePool.length} images` : "Artwork vault"}
         </Text>
 
-        {/* Spacer to keep title centred */}
-        <View style={styles.iconCircle} />
+        <View style={{ width: 34 }} />
       </View>
 
       {/* ── Grid or empty state ── */}
