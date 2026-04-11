@@ -1,0 +1,309 @@
+We are refactoring the artwork assignment logic in MusicContext.tsx and
+fixing the displayArtworkUri bug in PlayerScreen.tsx. Please apply ALL
+changes below exactly as described.
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+PART 1 — MusicContext.tsx
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+STEP 1: Add the ArtworkResolver class.
+Place this entire class BEFORE the "Types" section, replacing the
+existing `buildArtworkSequence` function entirely:
+
+---
+class ArtworkResolver {
+  private map = new Map<string, string>();
+  private lastResolved: string | null = null;
+  private pool: string[] = [];
+
+  setPool(pool: string[]) {
+    this.pool = pool;
+  }
+
+  restore(entries: Record<string, string>) {
+    this.map = new Map(Object.entries(entries));
+  }
+
+  resolve(songId: string): string | null {
+    if (!this.pool.length) return null;
+    const existing = this.map.get(songId);
+    if (existing && this.pool.includes(existing)) {
+      this.lastResolved = existing;
+      return existing;
+    }
+    const candidates = this.pool.filter((u) => u !== this.lastResolved);
+    const available = candidates.length > 0 ? candidates : this.pool;
+    const picked = available[Math.floor(Math.random() * available.length)];
+    this.map.set(songId, picked);
+    this.lastResolved = picked;
+    return picked;
+  }
+
+  assign(songId: string, uri: string) {
+    this.map.set(songId, uri);
+    this.lastResolved = uri;
+  }
+
+  reRoll(songId: string): string | null {
+    if (!this.pool.length) return null;
+    const current = this.map.get(songId) ?? null;
+    const candidates = this.pool.filter((u) => u !== current);
+    const available = candidates.length > 0 ? candidates : this.pool;
+    const picked = available[Math.floor(Math.random() * available.length)];
+    this.map.set(songId, picked);
+    return picked;
+  }
+
+  evict(removedUri: string) {
+    this.map.forEach((v, k) => {
+      if (v === removedUri) this.map.delete(k);
+    });
+    if (this.lastResolved === removedUri) this.lastResolved = null;
+  }
+
+  toJSON(): Record<string, string> {
+    const obj: Record<string, string> = {};
+    this.map.forEach((v, k) => { obj[k] = v; });
+    return obj;
+  }
+
+  async validate(pool: string[]) {
+    for (const [songId, uri] of this.map.entries()) {
+      if (!pool.includes(uri)) this.map.delete(songId);
+    }
+    this.pool = pool;
+  }
+}
+---
+
+STEP 2: Inside the context hook, replace the `artworkMap` useRef
+and `saveArtworkMap` with these:
+
+  // Replace:  const artworkMap = useRef(new Map<string, string>());
+  // With:
+  const resolver = useRef(new ArtworkResolver()).current;
+
+  // Replace the old saveArtworkMap with:
+  const saveArtworkMap = useCallback(() => {
+    AsyncStorage.setItem(
+      STORAGE_KEYS.ARTWORK_MAP,
+      JSON.stringify(resolver.toJSON()),
+    ).catch(() => {});
+  }, [resolver]);
+
+Also REMOVE the `pendingNewUris` useRef — it is no longer needed.
+
+STEP 3: Replace the artwork display useEffect (the one with
+`[currentSong?.id, imagePool]` deps) with this simpler version:
+
+  useEffect(() => {
+    if (!currentSong) return;
+    const pool = imagePoolRef.current;
+    if (!pool.length) return;
+    const uri = resolver.resolve(currentSong.id);
+    setCurrentArtworkUri(uri);
+    saveArtworkMap();
+  }, [currentSong?.id, imagePool]);
+
+STEP 4: In loadPersistedData, replace the artworkMap restore block with:
+
+  if (artMapRaw) {
+    try {
+      resolver.restore(JSON.parse(artMapRaw) as Record<string, string>);
+    } catch {}
+  }
+
+Then, AFTER resolvedPool is finalized and BEFORE setImagePool, add:
+
+  await resolver.validate(resolvedPool);
+  resolver.setPool(resolvedPool);
+
+Also REMOVE the call to buildArtworkSequence inside loadPersistedData
+— the resolver handles assignment lazily, no bulk pre-assignment needed.
+
+STEP 5: In scanDeviceMusic, REMOVE the buildArtworkSequence call.
+The resolver assigns lazily when each song plays.
+
+STEP 6: Delete the playSongFromLibrary and playFromContext functions
+and replace BOTH with a shared helper + two thin wrappers:
+
+  const buildAndPlay = useCallback(
+    async (song: Song, sourceList: Song[]) => {
+      let newQueue: Song[];
+      let targetIdx: number;
+      if (shuffleEnabled) {
+        const rest = shuffleArray(sourceList.filter((s) => s.id !== song.id));
+        newQueue = [song, ...rest];
+        targetIdx = 0;
+      } else {
+        newQueue = [...sourceList];
+        targetIdx = sourceList.findIndex((s) => s.id === song.id);
+        if (targetIdx < 0) targetIdx = 0;
+      }
+      const art = resolver.resolve(song.id);
+      setCurrentArtworkUri(art);
+      saveArtworkMap();
+      await TrackPlayer.reset();
+      await TrackPlayer.add(newQueue.map(songToTrack));
+      if (targetIdx > 0) await TrackPlayer.skip(targetIdx);
+      await TrackPlayer.play();
+      setQueue(newQueue);
+      setCurrentIndex(targetIdx);
+      await AsyncStorage.multiSet([
+        [STORAGE_KEYS.QUEUE, JSON.stringify(newQueue)],
+        [STORAGE_KEYS.CURRENT_INDEX, String(targetIdx)],
+      ]);
+    },
+    [shuffleEnabled, resolver, saveArtworkMap],
+  );
+
+  const playSongFromLibrary = useCallback(
+    async (song: Song) => {
+      try { await buildAndPlay(song, songs); }
+      catch (e) { console.error("playSongFromLibrary error", e); }
+    },
+    [songs, buildAndPlay],
+  );
+
+  const playFromContext = useCallback(
+    async (song: Song, contextList: Song[]) => {
+      if (!contextList.length) return;
+      try { await buildAndPlay(song, contextList); }
+      catch (e) { console.error("playFromContext error", e); }
+    },
+    [buildAndPlay],
+  );
+
+STEP 7: In toggleShuffle, REMOVE the buildArtworkSequence call.
+Replace the artwork lines after newOrder is built with:
+
+  const firstSong = newOrder[0];
+  if (firstSong) {
+    const art = resolver.resolve(firstSong.id);
+    setCurrentArtworkUri(art);
+    saveArtworkMap();
+  }
+
+STEP 8: Replace reRollArtwork, assignArtwork, assignArtworkToSong,
+and reRollArtworkForSong with these resolver-based versions:
+
+  const reRollArtwork = useCallback(() => {
+    if (!currentSong) return;
+    const picked = resolver.reRoll(currentSong.id);
+    if (picked) { setCurrentArtworkUri(picked); saveArtworkMap(); }
+  }, [currentSong, resolver, saveArtworkMap]);
+
+  const assignArtwork = useCallback((uri: string) => {
+    if (!currentSong) return;
+    resolver.assign(currentSong.id, uri);
+    setCurrentArtworkUri(uri);
+    saveArtworkMap();
+  }, [currentSong, resolver, saveArtworkMap]);
+
+  const assignArtworkToSong = useCallback((songId: string, imageUri: string) => {
+    resolver.assign(songId, imageUri);
+    if (currentSong?.id === songId) setCurrentArtworkUri(imageUri);
+    saveArtworkMap();
+  }, [currentSong, resolver, saveArtworkMap]);
+
+  const reRollArtworkForSong = useCallback((songId: string) => {
+    const picked = resolver.reRoll(songId);
+    if (picked) {
+      if (currentSong?.id === songId) setCurrentArtworkUri(picked);
+      saveArtworkMap();
+    }
+  }, [currentSong, resolver, saveArtworkMap]);
+
+STEP 9: Replace addImagesToPool with this race-free version
+(removes the old setTimeout hack and pendingNewUris logic):
+
+  const addImagesToPool = useCallback(
+    async (uris: string[], isCustom = true) => {
+      const next = [...new Set([...imagePool, ...uris])];
+      resolver.setPool(next);
+      imagePoolRef.current = next;
+      if (currentSong && uris.length > 0) {
+        const lastAdded = uris[uris.length - 1];
+        resolver.assign(currentSong.id, lastAdded);
+        setCurrentArtworkUri(lastAdded);
+      }
+      saveArtworkMap();
+      setImagePool(next);
+      await AsyncStorage.setItem(STORAGE_KEYS.IMAGE_POOL, JSON.stringify(next));
+      if (isCustom) {
+        setHasCustomImages(true);
+        await AsyncStorage.setItem(STORAGE_KEYS.IMAGE_POOL_CUSTOM, "true");
+      }
+    },
+    [imagePool, currentSong, resolver, saveArtworkMap],
+  );
+
+STEP 10: Replace removeImageFromPool with:
+
+  const removeImageFromPool = useCallback(
+    async (uri: string) => {
+      resolver.evict(uri);
+      if (currentSong) {
+        const newArt = resolver.resolve(currentSong.id);
+        setCurrentArtworkUri(newArt);
+      }
+      const next = imagePool.filter((u) => u !== uri);
+      resolver.setPool(next);
+      imagePoolRef.current = next;
+      saveArtworkMap();
+      setImagePool(next);
+      await AsyncStorage.setItem(STORAGE_KEYS.IMAGE_POOL, JSON.stringify(next));
+    },
+    [imagePool, currentSong, resolver, saveArtworkMap],
+  );
+
+STEP 11: Replace cropImageInPool with:
+
+  const cropImageInPool = useCallback(
+    async (oldUri: string, newUri: string) => {
+      resolver.evict(oldUri);
+      const next = imagePool.map((u) => (u === oldUri ? newUri : u));
+      resolver.setPool(next);
+      imagePoolRef.current = next;
+      setImagePool(next);
+      await AsyncStorage.setItem(STORAGE_KEYS.IMAGE_POOL, JSON.stringify(next));
+    },
+    [imagePool, resolver],
+  );
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+PART 2 — PlayerScreen.tsx
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Replace the current persistedArtUri ref + displayArtworkUri
+declaration with this block (adds artworkReady state guard):
+
+  const persistedArtUri  = useRef<string | null>(null);
+  const prevSongId       = useRef<string | null>(null);
+  const [artworkReady, setArtworkReady] = useState(false);
+
+  if (currentSong?.id !== prevSongId.current) {
+    prevSongId.current      = currentSong?.id ?? null;
+    persistedArtUri.current = null;
+  }
+  if (currentArtworkUri) {
+    persistedArtUri.current = currentArtworkUri;
+  }
+
+  useEffect(() => {
+    setArtworkReady(false);
+  }, [currentSong?.id]);
+
+  useEffect(() => {
+    if (!currentSong) return;
+    const t = setTimeout(() => setArtworkReady(true), 80);
+    return () => clearTimeout(t);
+  }, [currentArtworkUri, currentSong?.id]);
+
+  const displayArtworkUri = artworkReady
+    ? currentArtworkUri
+    : (currentArtworkUri ?? persistedArtUri.current);
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+Do not change anything else in either file.
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━

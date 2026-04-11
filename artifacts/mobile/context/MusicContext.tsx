@@ -16,43 +16,74 @@ import * as MediaLibrary from "expo-media-library";
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import { getDefaultArtworkUris } from "@/constants/defaultArtworks";
 
-// ── Artwork sequence builder ──────────────────────────────────────────────────
+// ── ArtworkResolver ───────────────────────────────────────────────────────────
 //
-// Walks the queue in order and assigns one image per song.
-// Rules:
-//   • Adjacent songs in the queue are NEVER assigned the same image.
-//   • When songs > images, images repeat freely for non-adjacent songs.
-//   • Pool of 1 image: all songs get that image (no-repeat falls back gracefully).
-//   • Assignment is random per session, so it changes each app restart.
+// Stateful class that lazily resolves and persists one artwork URI per song.
+// Replaces the old buildArtworkSequence bulk-build approach with O(1) per-song
+// resolution and eliminates the pendingNewUris / race-condition hacks.
 //
-function buildArtworkSequence(
-  queue: Song[],
-  pool: string[],
-  existing?: Map<string, string>,
-): Map<string, string> {
-  const map = new Map<string, string>();
-  if (!pool.length || !queue.length) return map;
+class ArtworkResolver {
+  private map = new Map<string, string>();
+  private lastResolved: string | null = null;
+  private pool: string[] = [];
 
-  let lastUri: string | null = null;
-
-  for (const song of queue) {
-    // Preserve any existing valid assignment so custom artwork is never lost
-    const prior = existing?.get(song.id);
-    if (prior && pool.includes(prior)) {
-      map.set(song.id, prior);
-      lastUri = prior;
-      continue;
-    }
-    // Exclude the last assigned image so adjacent songs differ
-    const candidates = pool.filter((u) => u !== lastUri);
-    // If only 1 image in pool, candidates will be empty — fall back to full pool
-    const available = candidates.length > 0 ? candidates : pool;
-    const picked = available[Math.floor(Math.random() * available.length)];
-    map.set(song.id, picked);
-    lastUri = picked;
+  setPool(pool: string[]) {
+    this.pool = pool;
   }
 
-  return map;
+  restore(entries: Record<string, string>) {
+    this.map = new Map(Object.entries(entries));
+  }
+
+  resolve(songId: string): string | null {
+    if (!this.pool.length) return null;
+    const existing = this.map.get(songId);
+    if (existing && this.pool.includes(existing)) {
+      this.lastResolved = existing;
+      return existing;
+    }
+    const candidates = this.pool.filter((u) => u !== this.lastResolved);
+    const available = candidates.length > 0 ? candidates : this.pool;
+    const picked = available[Math.floor(Math.random() * available.length)];
+    this.map.set(songId, picked);
+    this.lastResolved = picked;
+    return picked;
+  }
+
+  assign(songId: string, uri: string) {
+    this.map.set(songId, uri);
+    this.lastResolved = uri;
+  }
+
+  reRoll(songId: string): string | null {
+    if (!this.pool.length) return null;
+    const current = this.map.get(songId) ?? null;
+    const candidates = this.pool.filter((u) => u !== current);
+    const available = candidates.length > 0 ? candidates : this.pool;
+    const picked = available[Math.floor(Math.random() * available.length)];
+    this.map.set(songId, picked);
+    return picked;
+  }
+
+  evict(removedUri: string) {
+    this.map.forEach((v, k) => {
+      if (v === removedUri) this.map.delete(k);
+    });
+    if (this.lastResolved === removedUri) this.lastResolved = null;
+  }
+
+  toJSON(): Record<string, string> {
+    const obj: Record<string, string> = {};
+    this.map.forEach((v, k) => { obj[k] = v; });
+    return obj;
+  }
+
+  async validate(pool: string[]) {
+    for (const [songId, uri] of this.map.entries()) {
+      if (!pool.includes(uri)) this.map.delete(songId);
+    }
+    this.pool = pool;
+  }
 }
 
 // Keep the export for any legacy import — no longer used for in-app picking
@@ -298,21 +329,16 @@ const [MusicContextProvider, useMusicContext] = createContextHook(() => {
   // ── Artwork tracking ──────────────────────────────────────────────────────
   const [currentArtworkUri, setCurrentArtworkUri] = useState<string | null>(null);
 
-  // Full session map: songId → image URI, built once per queue-establishment.
-  // Built upfront in queue order so adjacent-song no-repeat is guaranteed
-  // structurally, not just reactively.
-  const artworkMap = useRef(new Map<string, string>());
+  // Lazily resolves and persists one artwork URI per song.
+  const resolver = useRef(new ArtworkResolver()).current;
 
-  // Persist artworkMap to AsyncStorage (non-blocking)
+  // Persist resolver state to AsyncStorage (non-blocking)
   const saveArtworkMap = useCallback(() => {
-    const obj: Record<string, string> = {};
-    artworkMap.current.forEach((v, k) => { obj[k] = v; });
-    AsyncStorage.setItem(STORAGE_KEYS.ARTWORK_MAP, JSON.stringify(obj)).catch(() => {});
-  }, []);
-
-  // URIs added in the current picker session — consumed once to prioritise
-  // showing fresh images immediately after the user adds them.
-  const pendingNewUris = useRef<string[]>([]);
+    AsyncStorage.setItem(
+      STORAGE_KEYS.ARTWORK_MAP,
+      JSON.stringify(resolver.toJSON()),
+    ).catch(() => {});
+  }, [resolver]);
 
   const imagePoolRef = useRef<string[]>([]);
   useEffect(() => { imagePoolRef.current = imagePool; }, [imagePool]);
@@ -338,56 +364,14 @@ const [MusicContextProvider, useMusicContext] = createContextHook(() => {
     loadPersistedData();
   }, [isPlayerReady]);
 
-  // ── Artwork display — fires when current song changes ──────────────────────
-  //
-  // Strategy:
-  //   1. If pendingNewUris exist (user just added images), pick the LAST image
-  //      in the new batch for the current song immediately (most recently added
-  //      image gets shown first). Then clear pendingNewUris.
-  //   2. Otherwise look up the pre-built artworkMap (O(1)).
-  //   3. If not in map (e.g. removed + re-added), fall back to random pick
-  //      excluding the last shown image.
-  //
+  // ── Artwork display — fires when current song or pool changes ─────────────
   useEffect(() => {
+    if (!currentSong) return;
     const pool = imagePoolRef.current;
-    if (!pool.length || !currentSong) {
-      // Guard: don't wipe artwork during intermediate renders where state
-      // updates haven't fully landed (e.g. setCurrentIndex fired before
-      // setQueue, leaving currentSong temporarily null). Explicit callers
-      // such as resetSetup and removeSongs clear currentArtworkUri when
-      // they genuinely want the player to show no artwork.
-      return;
-    }
-
-    const songId = currentSong.id;
-    const pending = pendingNewUris.current;
-
-    if (pending.length > 0) {
-      // Consume pending batch — pick the last (most recently added) that differs
-      // from whatever was just showing.
-      pendingNewUris.current = [];
-      const last = artworkMap.current.get(songId) ?? null;
-      const candidates = pending.filter((u) => u !== last);
-      const picked = candidates.length > 0
-        ? candidates[candidates.length - 1]   // last = most recently added
-        : pending[pending.length - 1];
-      artworkMap.current.set(songId, picked);
-      setCurrentArtworkUri(picked);
-      return;
-    }
-
-    // Normal path: look up pre-built map
-    const assigned = artworkMap.current.get(songId);
-    if (assigned && pool.includes(assigned)) {
-      setCurrentArtworkUri(assigned);
-      return;
-    }
-
-    // Fallback: image was removed, cropped, or song never assigned.
-    // Always use the first image in the pool so the player is never blank.
-    const picked = pool[0];
-    artworkMap.current.set(songId, picked);
-    setCurrentArtworkUri(picked);
+    if (!pool.length) return;
+    const uri = resolver.resolve(currentSong.id);
+    setCurrentArtworkUri(uri);
+    saveArtworkMap();
   }, [currentSong?.id, imagePool]);
 
   // ── Sync active track index + fetch lock-screen artwork ───────────────────
@@ -441,8 +425,7 @@ const [MusicContextProvider, useMusicContext] = createContextHook(() => {
       // Restore persisted song→image assignments
       if (artMapRaw) {
         try {
-          const obj = JSON.parse(artMapRaw) as Record<string, string>;
-          artworkMap.current = new Map(Object.entries(obj));
+          resolver.restore(JSON.parse(artMapRaw) as Record<string, string>);
         } catch {}
       }
 
@@ -485,6 +468,8 @@ const [MusicContextProvider, useMusicContext] = createContextHook(() => {
         resolvedPool = await getDefaultArtworkUris();
         await AsyncStorage.setItem(STORAGE_KEYS.IMAGE_POOL, JSON.stringify(resolvedPool));
       }
+      await resolver.validate(resolvedPool);
+      resolver.setPool(resolvedPool);
       imagePoolRef.current = resolvedPool;
       setImagePool(resolvedPool);
 
@@ -514,10 +499,6 @@ const [MusicContextProvider, useMusicContext] = createContextHook(() => {
           [STORAGE_KEYS.CURRENT_INDEX, String(idx)],
           [STORAGE_KEYS.SHUFFLE, "false"],
         ]);
-
-        // Pre-build artwork map — preserve saved song→image assignments loaded
-        // from AsyncStorage above; only fill in missing entries with new picks.
-        artworkMap.current = buildArtworkSequence(parsed, resolvedPool, artworkMap.current);
 
         const tracks = parsed.map(songToTrack);
         await TrackPlayer.setQueue(tracks);
@@ -553,9 +534,6 @@ const [MusicContextProvider, useMusicContext] = createContextHook(() => {
         return merged;
       });
       await new Promise<void>((r) => setTimeout(r, 50));
-
-      // Pre-build artwork sequence for the full merged queue (preserve existing)
-      artworkMap.current = buildArtworkSequence(merged, imagePoolRef.current, artworkMap.current);
 
       const tracks = merged.map(songToTrack);
       await TrackPlayer.setQueue(tracks);
@@ -595,7 +573,7 @@ const [MusicContextProvider, useMusicContext] = createContextHook(() => {
 
       if (newSongs.length === 0) {
         setIsSetupDone(false);
-        artworkMap.current.clear();
+        resolver.setPool([]);
         setCurrentArtworkUri(null);
         await TrackPlayer.reset();
         await Promise.all([
@@ -627,7 +605,7 @@ const [MusicContextProvider, useMusicContext] = createContextHook(() => {
       AsyncStorage.removeItem(STORAGE_KEYS.CURRENT_INDEX),
       AsyncStorage.setItem(STORAGE_KEYS.SHUFFLE, "false"),
     ]);
-    artworkMap.current.clear();
+    resolver.setPool([]);
     setCurrentArtworkUri(null);
     setIsSetupDone(false);
     setSongs([]);
@@ -661,98 +639,54 @@ const [MusicContextProvider, useMusicContext] = createContextHook(() => {
     [queue],
   );
 
+  // ── Shared queue-builder + player helper ─────────────────────────────────
+  const buildAndPlay = useCallback(
+    async (song: Song, sourceList: Song[]) => {
+      let newQueue: Song[];
+      let targetIdx: number;
+      if (shuffleEnabled) {
+        const rest = shuffleArray(sourceList.filter((s) => s.id !== song.id));
+        newQueue = [song, ...rest];
+        targetIdx = 0;
+      } else {
+        newQueue = [...sourceList];
+        targetIdx = sourceList.findIndex((s) => s.id === song.id);
+        if (targetIdx < 0) targetIdx = 0;
+      }
+      const art = resolver.resolve(song.id);
+      setCurrentArtworkUri(art);
+      saveArtworkMap();
+      await TrackPlayer.reset();
+      await TrackPlayer.add(newQueue.map(songToTrack));
+      if (targetIdx > 0) await TrackPlayer.skip(targetIdx);
+      await TrackPlayer.play();
+      setQueue(newQueue);
+      setCurrentIndex(targetIdx);
+      await AsyncStorage.multiSet([
+        [STORAGE_KEYS.QUEUE, JSON.stringify(newQueue)],
+        [STORAGE_KEYS.CURRENT_INDEX, String(targetIdx)],
+      ]);
+    },
+    [shuffleEnabled, resolver, saveArtworkMap],
+  );
+
   // ── Play a song chosen from the library (A-Z view) ───────────────────────
-  // Library always shows `songs` sorted A-Z. When the user taps a song there
-  // we build a new playback queue:
-  //   • Shuffle OFF → queue = songs A-Z, start at the tapped song's position
-  //   • Shuffle ON  → tapped song plays first, rest of songs shuffled after it
   const playSongFromLibrary = useCallback(
     async (song: Song) => {
-      try {
-        let newQueue: Song[];
-        let targetIdx: number;
-
-        if (shuffleEnabled) {
-          const rest = shuffleArray(songs.filter((s) => s.id !== song.id));
-          newQueue = [song, ...rest];
-          targetIdx = 0;
-        } else {
-          newQueue = [...songs]; // already sorted A-Z
-          targetIdx = songs.findIndex((s) => s.id === song.id);
-          if (targetIdx < 0) targetIdx = 0;
-        }
-
-        artworkMap.current = buildArtworkSequence(newQueue, imagePoolRef.current, artworkMap.current);
-        saveArtworkMap();
-        // Capture the resolved artwork URI for this song before any awaits.
-        const resolvedArt =
-          artworkMap.current.get(newQueue[targetIdx].id) ?? imagePoolRef.current[0] ?? null;
-        // Push artwork immediately so the player never shows a blank frame.
-        setCurrentArtworkUri(resolvedArt);
-        await TrackPlayer.setQueue(newQueue.map(songToTrack));
-        if (targetIdx > 0) await TrackPlayer.skip(targetIdx);
-        await TrackPlayer.play();
-        // Re-apply after queue/index settle so any intermediate activeTrack
-        // effect firing with stale state cannot clobber the correct artwork.
-        setQueue(newQueue);
-        setCurrentIndex(targetIdx);
-        setCurrentArtworkUri(resolvedArt);
-        await AsyncStorage.multiSet([
-          [STORAGE_KEYS.QUEUE, JSON.stringify(newQueue)],
-          [STORAGE_KEYS.CURRENT_INDEX, String(targetIdx)],
-        ]);
-      } catch (e) {
-        console.error("playSongFromLibrary error", e);
-      }
+      try { await buildAndPlay(song, songs); }
+      catch (e) { console.error("playSongFromLibrary error", e); }
     },
-    [shuffleEnabled, songs, saveArtworkMap],
+    [songs, buildAndPlay],
   );
 
   // ── Play from a context-specific list (Liked / Recent / filtered Songs) ──
-  // This is the context-aware queue builder. Whatever list the user is currently
-  // viewing in the library becomes the exclusive, isolated playback queue.
   const playFromContext = useCallback(
     async (song: Song, contextList: Song[]) => {
       if (!contextList.length) return;
-      try {
-        let newQueue: Song[];
-        let targetIdx: number;
-
-        if (shuffleEnabled) {
-          const rest = shuffleArray(contextList.filter((s) => s.id !== song.id));
-          newQueue = [song, ...rest];
-          targetIdx = 0;
-        } else {
-          newQueue = [...contextList];
-          targetIdx = contextList.findIndex((s) => s.id === song.id);
-          if (targetIdx < 0) targetIdx = 0;
-        }
-
-        artworkMap.current = buildArtworkSequence(newQueue, imagePoolRef.current, artworkMap.current);
-        saveArtworkMap();
-        // Capture the resolved artwork URI for this song before any awaits.
-        const resolvedArt =
-          artworkMap.current.get(newQueue[targetIdx].id) ?? imagePoolRef.current[0] ?? null;
-        // Push artwork immediately so the player never shows a blank frame.
-        setCurrentArtworkUri(resolvedArt);
-        await TrackPlayer.reset();
-        await TrackPlayer.add(newQueue.map(songToTrack));
-        if (targetIdx > 0) await TrackPlayer.skip(targetIdx);
-        await TrackPlayer.play();
-        // Re-apply after queue/index settle so any intermediate activeTrack
-        // effect firing with stale state cannot clobber the correct artwork.
-        setQueue(newQueue);
-        setCurrentIndex(targetIdx);
-        setCurrentArtworkUri(resolvedArt);
-        await AsyncStorage.multiSet([
-          [STORAGE_KEYS.QUEUE, JSON.stringify(newQueue)],
-          [STORAGE_KEYS.CURRENT_INDEX, String(targetIdx)],
-        ]);
-      } catch (e) {
-        console.error("playFromContext error", e);
-      }
+      try { await buildAndPlay(song, contextList); }
+      catch (e) { console.error("playFromContext error", e); }
     },
-    [shuffleEnabled, saveArtworkMap],
+    [buildAndPlay],
   );
 
   // ── Playback controls ─────────────────────────────────────────────────────
@@ -788,17 +722,17 @@ const [MusicContextProvider, useMusicContext] = createContextHook(() => {
 
     const newOrder = next ? shuffleArray(contextSongs) : [...contextSongs];
 
-    artworkMap.current = buildArtworkSequence(newOrder, imagePoolRef.current, artworkMap.current);
-    saveArtworkMap();
-    const resolvedArt =
-      artworkMap.current.get(newOrder[0]?.id ?? "") ?? imagePoolRef.current[0] ?? null;
-    setCurrentArtworkUri(resolvedArt);
+    const firstSong = newOrder[0];
+    if (firstSong) {
+      const art = resolver.resolve(firstSong.id);
+      setCurrentArtworkUri(art);
+      saveArtworkMap();
+    }
 
     await TrackPlayer.setQueue(newOrder.map(songToTrack));
     await TrackPlayer.skip(0);
     setQueue(newOrder);
     setCurrentIndex(0);
-    setCurrentArtworkUri(resolvedArt);
     await AsyncStorage.multiSet([
       [STORAGE_KEYS.QUEUE, JSON.stringify(newOrder)],
       [STORAGE_KEYS.CURRENT_INDEX, "0"],
@@ -822,71 +756,48 @@ const [MusicContextProvider, useMusicContext] = createContextHook(() => {
 
   // ── Re-Roll artwork for current song ─────────────────────────────────────
   const reRollArtwork = useCallback(() => {
-    if (!currentSong || !imagePoolRef.current.length) return;
-    const pool = imagePoolRef.current;
-    const current = artworkMap.current.get(currentSong.id) ?? null;
-    const candidates = pool.filter((u) => u !== current);
-    const from = candidates.length > 0 ? candidates : pool;
-    const picked = from[Math.floor(Math.random() * from.length)];
-    artworkMap.current.set(currentSong.id, picked);
-    setCurrentArtworkUri(picked);
-    saveArtworkMap();
-  }, [currentSong, saveArtworkMap]);
+    if (!currentSong) return;
+    const picked = resolver.reRoll(currentSong.id);
+    if (picked) { setCurrentArtworkUri(picked); saveArtworkMap(); }
+  }, [currentSong, resolver, saveArtworkMap]);
 
   // ── Manually assign a specific image to current song ─────────────────────
   const assignArtwork = useCallback((uri: string) => {
     if (!currentSong) return;
-    artworkMap.current.set(currentSong.id, uri);
+    resolver.assign(currentSong.id, uri);
     setCurrentArtworkUri(uri);
     saveArtworkMap();
-  }, [currentSong, saveArtworkMap]);
+  }, [currentSong, resolver, saveArtworkMap]);
 
   // ── Assign a specific image to any song by its ID ────────────────────────
   const assignArtworkToSong = useCallback((songId: string, imageUri: string) => {
-    artworkMap.current.set(songId, imageUri);
-    if (currentSong?.id === songId) {
-      setCurrentArtworkUri(imageUri);
-    }
+    resolver.assign(songId, imageUri);
+    if (currentSong?.id === songId) setCurrentArtworkUri(imageUri);
     saveArtworkMap();
-  }, [currentSong, saveArtworkMap]);
+  }, [currentSong, resolver, saveArtworkMap]);
 
   // ── Re-Roll artwork for any song by its ID ───────────────────────────────
   const reRollArtworkForSong = useCallback((songId: string) => {
-    const pool = imagePoolRef.current;
-    if (!pool.length) return;
-    const current = artworkMap.current.get(songId) ?? null;
-    const candidates = pool.filter((u) => u !== current);
-    const from = candidates.length > 0 ? candidates : pool;
-    const picked = from[Math.floor(Math.random() * from.length)];
-    artworkMap.current.set(songId, picked);
-    if (currentSong?.id === songId) {
-      setCurrentArtworkUri(picked);
+    const picked = resolver.reRoll(songId);
+    if (picked) {
+      if (currentSong?.id === songId) setCurrentArtworkUri(picked);
+      saveArtworkMap();
     }
-    saveArtworkMap();
-  }, [currentSong, saveArtworkMap]);
+  }, [currentSong, resolver, saveArtworkMap]);
 
   // ── Image pool management ─────────────────────────────────────────────────
 
   const addImagesToPool = useCallback(
     async (uris: string[], isCustom = true) => {
       const next = [...new Set([...imagePool, ...uris])];
-
-      // Mark as pending so the artwork effect shows the latest added image
-      // immediately for the current song (before the next queue rebuild).
-      pendingNewUris.current = uris;
-      // Remove current song from map so the effect picks from pendingNewUris
-      if (currentSong) artworkMap.current.delete(currentSong.id);
-
-      // Rebuild the full sequence with the expanded pool so future songs also
-      // benefit from the new images (non-current songs get re-assigned).
-      const updatedQueue = queue; // capture current queue
-      // Delay rebuilding until after state update so imagePoolRef is current
-      setTimeout(() => {
-        artworkMap.current = buildArtworkSequence(updatedQueue, next);
-        // Re-delete current song so pendingNewUris logic in useEffect wins
-        if (currentSong) artworkMap.current.delete(currentSong.id);
-      }, 0);
-
+      resolver.setPool(next);
+      imagePoolRef.current = next;
+      if (currentSong && uris.length > 0) {
+        const lastAdded = uris[uris.length - 1];
+        resolver.assign(currentSong.id, lastAdded);
+        setCurrentArtworkUri(lastAdded);
+      }
+      saveArtworkMap();
       setImagePool(next);
       await AsyncStorage.setItem(STORAGE_KEYS.IMAGE_POOL, JSON.stringify(next));
       if (isCustom) {
@@ -894,20 +805,24 @@ const [MusicContextProvider, useMusicContext] = createContextHook(() => {
         await AsyncStorage.setItem(STORAGE_KEYS.IMAGE_POOL_CUSTOM, "true");
       }
     },
-    [imagePool, currentSong, queue],
+    [imagePool, currentSong, resolver, saveArtworkMap],
   );
 
   const removeImageFromPool = useCallback(
     async (uri: string) => {
-      // Evict songs that were assigned this image — they'll be re-picked lazily
-      artworkMap.current.forEach((v, k) => {
-        if (v === uri) artworkMap.current.delete(k);
-      });
+      resolver.evict(uri);
+      if (currentSong) {
+        const newArt = resolver.resolve(currentSong.id);
+        setCurrentArtworkUri(newArt);
+      }
       const next = imagePool.filter((u) => u !== uri);
+      resolver.setPool(next);
+      imagePoolRef.current = next;
+      saveArtworkMap();
       setImagePool(next);
       await AsyncStorage.setItem(STORAGE_KEYS.IMAGE_POOL, JSON.stringify(next));
     },
-    [imagePool],
+    [imagePool, currentSong, resolver, saveArtworkMap],
   );
 
   const pickImageFolder = useCallback(async () => {
@@ -923,17 +838,14 @@ const [MusicContextProvider, useMusicContext] = createContextHook(() => {
 
   const cropImageInPool = useCallback(
     async (oldUri: string, newUri: string) => {
-      // Only replace the URI in the pool array — do NOT update artworkMap.
-      // This means the currently displayed artwork stays unchanged after a crop.
-      // The cropped version enters the pool silently; it will appear naturally
-      // when the sequence is rebuilt (next shuffle / next scan / next restart).
-      // Songs that were using the old URI will fall back to a fresh random pick
-      // the next time they play (pool.includes check in the artwork effect fails).
+      resolver.evict(oldUri);
       const next = imagePool.map((u) => (u === oldUri ? newUri : u));
+      resolver.setPool(next);
+      imagePoolRef.current = next;
       setImagePool(next);
       await AsyncStorage.setItem(STORAGE_KEYS.IMAGE_POOL, JSON.stringify(next));
     },
-    [imagePool],
+    [imagePool, resolver],
   );
 
   const status = {
