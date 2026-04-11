@@ -67,12 +67,31 @@ export default function PlayerScreen() {
     seekTo,
   } = useMusicContext();
 
-  // Keep the last non-null artwork URI so the player never flashes the blank
-  // placeholder during the brief window between a song change and the artwork
-  // effect settling on the correct image for the new track.
-  const persistedArtUri = useRef<string | null>(null);
-  if (currentArtworkUri) persistedArtUri.current = currentArtworkUri;
-  const displayArtworkUri = currentArtworkUri ?? persistedArtUri.current;
+  const persistedArtUri   = useRef<string | null>(null);
+  const prevSongId        = useRef<string | null>(null);
+  const [artworkReady, setArtworkReady] = useState(false);
+
+  if (currentSong?.id !== prevSongId.current) {
+    prevSongId.current      = currentSong?.id ?? null;
+    persistedArtUri.current = null;
+  }
+  if (currentArtworkUri) {
+    persistedArtUri.current = currentArtworkUri;
+  }
+
+  useEffect(() => {
+    setArtworkReady(false);
+  }, [currentSong?.id]);
+
+  useEffect(() => {
+    if (!currentSong) return;
+    const t = setTimeout(() => setArtworkReady(true), 80);
+    return () => clearTimeout(t);
+  }, [currentArtworkUri, currentSong?.id]);
+
+  const displayArtworkUri = artworkReady
+    ? currentArtworkUri
+    : (currentArtworkUri ?? persistedArtUri.current);
 
   const isFavorite = currentSong ? favorites.includes(currentSong.uri) : false;
 
